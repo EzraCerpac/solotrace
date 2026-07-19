@@ -1,4 +1,10 @@
-import type { Capabilities, FingeringMode, NoteEvent, Project } from './types'
+import type {
+  Capabilities,
+  DraftEngine,
+  FingeringMode,
+  NoteEvent,
+  Project,
+} from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -46,6 +52,7 @@ export const api = {
     tuning: number[],
     fretCount: number,
     expectedRevision: number,
+    engine: DraftEngine,
   ) =>
     request<Project>(`/api/projects/${encodeURIComponent(projectId)}/process`, {
       method: 'POST',
@@ -55,6 +62,7 @@ export const api = {
         tuning,
         fret_count: fretCount,
         expected_revision: expectedRevision,
+        engine,
       }),
     }),
 

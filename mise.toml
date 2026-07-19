@@ -5,6 +5,10 @@ run = [
   "pnpm --dir web install",
 ]
 
+[tasks.install-models]
+description = "Install enhanced local Demucs and Basic Pitch workers"
+run = "./scripts/install-enhanced-models.sh"
+
 [tasks.server]
 description = "Run API and built web app"
 run = "UV_CACHE_DIR=.uv-cache uv run solotrace"

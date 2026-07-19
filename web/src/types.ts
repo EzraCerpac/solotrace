@@ -2,6 +2,7 @@ export type AssetRole = 'original' | 'lead' | 'backing'
 export type RunState = 'idle' | 'queued' | 'running' | 'complete' | 'failed'
 export type StageState = 'pending' | 'running' | 'complete' | 'failed' | 'skipped'
 export type FingeringMode = 'balanced' | 'easiest' | 'position'
+export type DraftEngine = 'enhanced' | 'preview'
 
 export interface Confidence {
   pitch: number
@@ -111,6 +112,7 @@ export interface Capabilities {
     selected: string
     available: {
       preview: boolean
+      demucsMlx: boolean
     }
     notice: string
   }
@@ -118,7 +120,9 @@ export interface Capabilities {
     selected: string
     available: {
       pyin: boolean
+      basicPitch: boolean
     }
   }
+  enhancedReady: boolean
   privacy: string
 }

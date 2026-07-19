@@ -427,6 +427,27 @@ code {
   background: var(--nickel-light);
 }
 
+.engine-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid transparent;
+}
+
+.engine-choice strong {
+  font-size: 0.76rem;
+}
+
+.engine-choice small {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+}
+
+.engine-choice.active {
+  border-color: color-mix(in srgb, var(--ocean) 35%, transparent);
+  background: var(--ocean-soft);
+}
+
 .rail-provenance {
   margin-top: auto;
 }

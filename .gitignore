@@ -1,6 +1,8 @@
 .DS_Store
 .env
 .venv/
+.workers/
+.benchmarks/
 .uv-cache/
 __pycache__/
 *.py[cod]

@@ -8,10 +8,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .audio import AudioProcessingError, create_preview_stems, transcribe_pyin
+from .config import Settings
+from .enhanced import create_enhanced_stems, transcribe_basic_pitch
 from .models import (
     MediaAsset,
     Passage,
     PipelineStage,
+    ProcessingEngine,
     ProcessingRun,
     Project,
     RunState,
@@ -42,8 +45,9 @@ def new_run() -> ProcessingRun:
 
 
 class Pipeline:
-    def __init__(self, store: ProjectStore):
+    def __init__(self, store: ProjectStore, settings: Settings | None = None):
         self.store = store
+        self.settings = settings or Settings.load()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="solotrace")
         self._project_jobs: dict[str, str] = {}
         self._lock = threading.RLock()
@@ -111,6 +115,7 @@ class Pipeline:
         tuning: list[int],
         fret_count: int,
         expected_revision: int,
+        engine: ProcessingEngine = "preview",
     ) -> Project:
         if self._closing:
             raise RuntimeError("SoloTrace is shutting down")
@@ -126,6 +131,11 @@ class Pipeline:
             )
         if end_s - start_s > 180:
             raise ValueError("Mark a solo no longer than 3 minutes")
+        if engine == "enhanced" and not self.settings.enhanced_models_available:
+            raise ValueError(
+                "Enhanced models are not installed. Run "
+                "`./scripts/install-enhanced-models.sh` or choose Fast preview."
+            )
         base_revision = expected_revision
         with self._lock:
             active = self._project_jobs.get(project_id)
@@ -158,6 +168,7 @@ class Pipeline:
             end_s,
             tuning,
             fret_count,
+            engine,
         )
         return queued
 
@@ -220,6 +231,7 @@ class Pipeline:
         end_s: float,
         tuning: list[int],
         fret_count: int,
+        engine: ProcessingEngine,
     ) -> None:
         directory = self.store.project_dir(project_id)
         original = directory / "original.wav"
@@ -241,22 +253,38 @@ class Pipeline:
                     stage_state=StageState.running,
                     message="Listening for the guitar",
                 )
-                sample_rate, duration = create_preview_stems(
-                    original,
-                    temporary_lead,
-                    temporary_backing,
-                    start_s,
-                    end_s,
-                )
+                if engine == "enhanced":
+                    sample_rate, duration = create_enhanced_stems(
+                        original,
+                        temporary_lead,
+                        temporary_backing,
+                        start_s,
+                        end_s,
+                        temporary,
+                        self.settings.demucs_executable,
+                    )
+                    separation_detail = (
+                        "Demucs htdemucs_6s; every guitar in the marked passage"
+                    )
+                else:
+                    sample_rate, duration = create_preview_stems(
+                        original,
+                        temporary_lead,
+                        temporary_backing,
+                        start_s,
+                        end_s,
+                    )
+                    separation_detail = (
+                        "Fast local preview; guitar may share frequencies with "
+                        "other instruments"
+                    )
                 self._set_run(
                     project_id,
                     run_id,
                     stage_id="separate",
                     stage_state=StageState.complete,
                     message="Hearing notes",
-                    detail=(
-                        "Local preview; guitar may share frequencies with other instruments"
-                    ),
+                    detail=separation_detail,
                 )
                 self._set_run(
                     project_id,
@@ -264,14 +292,28 @@ class Pipeline:
                     stage_id="hear",
                     stage_state=StageState.running,
                 )
-                tab = transcribe_pyin(
-                    temporary_lead,
-                    start_s,
-                    end_s,
-                    tuning,
-                    fret_count,
-                    rhythm_path=original,
-                )
+                if engine == "enhanced":
+                    tab = transcribe_basic_pitch(
+                        temporary_lead,
+                        original,
+                        start_s,
+                        end_s,
+                        sample_rate,
+                        tuning,
+                        fret_count,
+                        temporary,
+                        self.settings.basic_pitch_python,
+                        self.settings.basic_pitch_worker,
+                    )
+                else:
+                    tab = transcribe_pyin(
+                        temporary_lead,
+                        start_s,
+                        end_s,
+                        tuning,
+                        fret_count,
+                        rhythm_path=original,
+                    )
                 self._set_run(
                     project_id,
                     run_id,
@@ -309,6 +351,7 @@ class Pipeline:
             superseded: list[str] = []
 
             def finish(project: Project) -> Project:
+                enhanced = engine == "enhanced"
                 superseded.extend(
                     asset.filename
                     for asset in project.assets
@@ -327,7 +370,11 @@ class Pipeline:
                             filename=lead_filename,
                             duration_s=duration,
                             sample_rate=sample_rate,
-                            method="Local frequency-focused preview",
+                            method=(
+                                "Demucs htdemucs_6s guitar estimate"
+                                if enhanced
+                                else "Local frequency-focused preview"
+                            ),
                         ),
                         MediaAsset(
                             role="backing",
@@ -335,7 +382,11 @@ class Pipeline:
                             filename=backing_filename,
                             duration_s=duration,
                             sample_rate=sample_rate,
-                            method="Original minus frequency-focused preview",
+                            method=(
+                                "Original minus Demucs guitar estimate in marked passage"
+                                if enhanced
+                                else "Original minus frequency-focused preview"
+                            ),
                         ),
                     ]
                 )
@@ -357,15 +408,26 @@ class Pipeline:
                         ),
                         "tab": tab.model_copy(update={"revision": project.tab.revision + 1}),
                         "run": complete_run,
-                        "separation_scope": "preview",
-                        "provenance": [
-                            "Audio decoded locally with FFmpeg.",
-                            "Preview stem uses harmonic, center-focused filtering; it is not "
-                            "lead-only separation.",
-                            "Notes and beats estimated locally with librosa pYIN "
-                            "and beat tracking.",
-                            "String and fret positions optimized for playability.",
-                        ],
+                        "separation_scope": "all-guitar" if enhanced else "preview",
+                        "provenance": (
+                            [
+                                "Audio decoded locally with FFmpeg.",
+                                "Demucs htdemucs_6s estimated every guitar in the "
+                                "marked passage; it does not distinguish lead from rhythm.",
+                                "Notes estimated locally with Spotify Basic Pitch; "
+                                "beats estimated locally with librosa.",
+                                "String and fret positions optimized for playability.",
+                            ]
+                            if enhanced
+                            else [
+                                "Audio decoded locally with FFmpeg.",
+                                "Preview stem uses harmonic, center-focused filtering; "
+                                "it is not lead-only separation.",
+                                "Notes and beats estimated locally with librosa pYIN "
+                                "and beat tracking.",
+                                "String and fret positions optimized for playability.",
+                            ]
+                        ),
                     }
                 )
 

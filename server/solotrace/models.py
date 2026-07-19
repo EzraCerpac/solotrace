@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+ProcessingEngine = Literal["preview", "enhanced"]
+
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -174,6 +176,7 @@ class ProcessRequest(StrictModel):
     tuning: list[int] = Field(default_factory=lambda: [40, 45, 50, 55, 59, 64])
     fret_count: int = Field(default=22, ge=12, le=36)
     expected_revision: int = Field(ge=1)
+    engine: ProcessingEngine = "preview"
 
     @model_validator(mode="after")
     def validate_range(self) -> ProcessRequest:

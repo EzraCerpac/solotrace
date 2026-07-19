@@ -10,10 +10,16 @@ from solotrace.fingering import legal_fingerings
 
 def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SOLOTRACE_WORKER_DIR", str(tmp_path / "missing-workers"))
     with TestClient(app) as client:
         health = client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["demo_project_id"] == DEMO_ID
+        assert health.json()["separator"] == "preview"
+
+        capabilities = client.get("/api/capabilities").json()
+        assert capabilities["enhancedReady"] is False
+        assert capabilities["separation"]["available"]["demucsMlx"] is False
 
         response = client.get(f"/api/projects/{DEMO_ID}")
         assert response.status_code == 200

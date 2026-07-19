@@ -20,6 +20,9 @@ import re
 
 from fastapi.testclient import TestClient
 from solotrace.api import app
+from solotrace.config import Settings
+
+assert Settings.load().basic_pitch_worker.is_file()
 
 with TestClient(app) as client:
     response = client.get("/")

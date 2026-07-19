@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     settings = Settings.load()
     store = ProjectStore(settings.data_dir)
     ensure_demo(store)
-    pipeline = Pipeline(store)
+    pipeline = Pipeline(store, settings)
     app.state.settings = settings
     app.state.store = store
     app.state.pipeline = pipeline
@@ -143,10 +143,11 @@ def _project_or_404(store: ProjectStore, project_id: str) -> Project:
 
 @app.get("/api/health", response_model=HealthResponse)
 def health(request: Request) -> HealthResponse:
+    enhanced = _settings(request).enhanced_models_available
     return HealthResponse(
         ffmpeg=ffmpeg_available(),
-        separator="preview",
-        transcriber="pyin",
+        separator="demucs-mlx" if enhanced else "preview",
+        transcriber="basic-pitch" if enhanced else "pyin",
         demo_project_id=DEMO_ID,
     )
 
@@ -154,27 +155,31 @@ def health(request: Request) -> HealthResponse:
 @app.get("/api/capabilities")
 def capabilities(request: Request) -> dict[str, object]:
     settings = _settings(request)
+    enhanced = settings.enhanced_models_available
     return {
         "audio": {
             "ffmpeg": ffmpeg_available(),
             "maxUploadMb": settings.max_upload_bytes // 1024 // 1024,
         },
         "separation": {
-            "selected": "preview",
+            "selected": "demucsMlx" if enhanced else "preview",
             "available": {
                 "preview": True,
+                "demucsMlx": enhanced,
             },
             "notice": (
-                "Built-in preview attenuates center-focused guitar frequencies. "
-                "It is not lead-only separation."
+                "Demucs estimates every guitar in the marked passage, not just the "
+                "solo. Fast preview uses frequency filtering."
             ),
         },
         "transcription": {
-            "selected": "pyin",
+            "selected": "basicPitch" if enhanced else "pyin",
             "available": {
                 "pyin": True,
+                "basicPitch": enhanced,
             },
         },
+        "enhancedReady": enhanced,
         "privacy": "Audio stays on this machine.",
     }
 
@@ -297,6 +302,7 @@ def process_project(
             tuning=body.tuning,
             fret_count=body.fret_count,
             expected_revision=body.expected_revision,
+            engine=body.engine,
         )
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Project not found") from error

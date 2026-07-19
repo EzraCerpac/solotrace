@@ -12,6 +12,7 @@ import { formatTime, minimumConfidence, pitchName } from './music'
 import type {
   AssetRole,
   Capabilities,
+  DraftEngine,
   Fingering,
   FingeringMode,
   NoteEvent,
@@ -31,6 +32,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [project, setProject] = useState<Project | null>(null)
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null)
+  const [draftEngine, setDraftEngine] = useState<DraftEngine>('preview')
   const [loading, setLoading] = useState(true)
   const [track, setTrack] = useState<AssetRole>('original')
   const [currentTime, setCurrentTime] = useState(0)
@@ -55,6 +57,7 @@ function App() {
       ])
       setProjects(nextProjects)
       setCapabilities(nextCapabilities)
+      setDraftEngine(nextCapabilities.enhancedReady ? 'enhanced' : 'preview')
       const initial =
         nextProjects.find((candidate) => candidate.demo) ?? nextProjects.at(0) ?? null
       setProject(initial)
@@ -297,6 +300,7 @@ function App() {
         project.tab.tuning,
         project.tab.fret_count,
         project.tab.revision,
+        draftEngine,
       )
       adoptProject(next, false)
     } catch (draftError) {
@@ -466,6 +470,37 @@ function App() {
             <span>{project.tab.fret_count} frets</span>
           </div>
           <div className="rail-group">
+            <p className="rail-label">Draft engine</p>
+            <button
+              type="button"
+              className={`rail-choice engine-choice ${
+                draftEngine === 'enhanced' ? 'active' : ''
+              }`}
+              disabled={saving || !capabilities?.enhancedReady}
+              aria-pressed={draftEngine === 'enhanced'}
+              onClick={() => setDraftEngine('enhanced')}
+            >
+              <strong>Enhanced local</strong>
+              <small>
+                {capabilities?.enhancedReady
+                  ? 'Demucs + Basic Pitch'
+                  : 'Models not installed'}
+              </small>
+            </button>
+            <button
+              type="button"
+              className={`rail-choice engine-choice ${
+                draftEngine === 'preview' ? 'active' : ''
+              }`}
+              disabled={saving}
+              aria-pressed={draftEngine === 'preview'}
+              onClick={() => setDraftEngine('preview')}
+            >
+              <strong>Fast preview</strong>
+              <small>Frequency filter + pYIN</small>
+            </button>
+          </div>
+          <div className="rail-group">
             <p className="rail-label">Draft style</p>
             <button
               type="button"
@@ -499,7 +534,9 @@ function App() {
                 ? 'Exact demo stems'
                 : project.separation_scope === 'preview'
                   ? 'Local preview'
-                  : 'Guitar separator'}
+                  : project.separation_scope === 'all-guitar'
+                    ? 'Demucs guitar stem'
+                    : 'Guitar separator'}
             </strong>
             <span>Audio stays local</span>
           </div>

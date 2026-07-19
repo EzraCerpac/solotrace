@@ -19,10 +19,14 @@ positions a guitarist used.
 - Export native project JSON, MusicXML 4.0, MIDI, ASCII tab, or a ZIP with audio.
 - Start instantly with the exact-stem `Northbound Lights` synthetic demo.
 
-The built-in upload pipeline currently uses a rough, fully local preview:
-frequency-focused separation plus librosa pYIN transcription. Optional MLX
-separation and Basic Pitch workers are the next adapter layer. The UI labels
-preview stems honestly because frequency filtering is not lead-only separation.
+Uploaded songs offer two explicit local engines:
+
+- **Enhanced local:** Demucs-MLX `htdemucs_6s` guitar separation plus Spotify
+  Basic Pitch note and bend transcription.
+- **Fast preview:** frequency-focused separation plus librosa pYIN.
+
+Enhanced separation removes the combined guitar estimate, not reliably only the
+lead guitar. The UI and project provenance keep that limitation visible.
 
 ## Architecture
 
@@ -50,6 +54,7 @@ Requirements: macOS or Linux, FFmpeg, `uv`, `pnpm`, and `mise`.
 
 ```bash
 mise run install
+mise run install-models
 pnpm --dir web build
 mise run server
 ```
@@ -88,25 +93,29 @@ production build.
 
 ## Processing model
 
-The shipped draft path is intentionally deterministic and account-free:
+The enhanced draft path is deterministic and account-free:
 
-1. Center-focused harmonic preview separation.
-2. librosa pYIN, onset, and beat estimation.
-3. Playability optimization across legal string/fret positions.
-4. Manual synchronized correction.
+1. Demucs-MLX `htdemucs_6s` all-guitar separation for the marked passage.
+2. Spotify Basic Pitch polyphonic note and bend estimation.
+3. librosa beat estimation while retaining exact audio timestamps.
+4. Playability optimization across legal string/fret positions.
+5. Manual synchronized correction.
 
-Two stronger local upgrades were tested on this Mac but are not silently selected:
-Demucs-MLX `htdemucs_6s` for all-guitar separation and Basic Pitch CoreML for
-note/bend transcription. They require separate Python environments and about
-105 MB of first-run model cache. See
-[`docs/model-evaluation.md`](docs/model-evaluation.md) for verified commands,
-limitations, and the open product choice.
+The UI selects Enhanced local when both isolated workers are installed and
+always keeps Fast preview available. The first enhanced separation downloads a
+52 MB converted model file. Worker environments currently use about 1.7 GB.
+See [`docs/model-benchmark-results.md`](docs/model-benchmark-results.md) for the
+12-song evaluation and [`docs/model-evaluation.md`](docs/model-evaluation.md)
+for installation and limitations.
 
 ## Project data
 
 Runtime data uses the private per-user application-data directory
 (`~/Library/Application Support/SoloTrace` on macOS, the XDG data directory on
 Linux). Set `SOLOTRACE_DATA_DIR` to override it.
+
+Enhanced worker environments default to `.workers` in a source checkout. Set
+`SOLOTRACE_WORKER_DIR` when starting an installed wheel from elsewhere.
 
 ```text
 SoloTrace/

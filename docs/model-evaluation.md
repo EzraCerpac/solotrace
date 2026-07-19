@@ -1,9 +1,14 @@
 # Local model evaluation
 
-SoloTrace ships with the smaller preview + pYIN path. It starts immediately,
-keeps audio private, and gives the editor a dependable fallback. Two higher-cost
-workers were run successfully on Apple Silicon and remain an explicit product
-choice rather than a hidden download.
+SoloTrace keeps the smaller preview + pYIN path as an instant fallback. The
+enhanced path uses separate Demucs-MLX and Basic Pitch workers and becomes the
+default only when both are actually installed.
+
+Install both:
+
+```bash
+./scripts/install-enhanced-models.sh
+```
 
 ## Separation: Demucs-MLX
 
@@ -26,11 +31,15 @@ uv pip install --python .workers/separate/bin/python \
   /absolute/song.wav
 ```
 
-The first run converts and caches roughly 105 MB. The six outputs are drums,
+The first run downloads a 52 MB converted weight file on the tested machine.
+The isolated worker environments use about 1.7 GB. The six outputs are drums,
 bass, other, vocals, guitar, and piano. This is **all guitar**, not reliably the
-solo guitar. A default backing can sum the five non-guitar stems. A Labs
-alternative can subtract the guitar estimate from the original; it reconstructs
-the mix exactly as a pair but retains guitar missed by the separator.
+solo guitar. SoloTrace subtracts that estimate from the original only inside the
+marked passage. This keeps original and backing sample-aligned, but missed guitar
+remains audible.
+
+MLX needs access to the Apple Metal device. A sandboxed or headless macOS process
+can fail with `No Metal device available`; a normal local app launch works.
 
 ## Transcription: Basic Pitch CoreML
 
@@ -44,22 +53,31 @@ uv pip install --python .workers/transcribe/bin/python \
 ```
 
 A generated 440 Hz tone produced one A4 event and 83 pitch-bend frames through
-the CoreML model. Event timestamps are relative to the input clip; SoloTrace
-must add the marked-passage offset and preserve the returned contour rather than
-Basic Pitch's default 120 BPM MIDI timing.
+the CoreML model. SoloTrace adds the marked-passage offset to each returned
+event and preserves the contour rather than using Basic Pitch's default 120 BPM
+MIDI timing.
 
 Keep this worker separate from Demucs. Demucs conversion currently resolves
 `setuptools==83`, while Basic Pitch's current resampling dependency still needs
 the `pkg_resources` module present in setuptools 80.
 
-## Decision left visible
+## Public benchmark decision
 
-The stronger workers improve some recordings but add a large first-run download,
-longer processing, extra dependency locks, and an all-guitar-versus-lead-guitar
-ambiguity. The next product decision is whether to:
+All 12 EGSet12 public electric-guitar solos were evaluated against their exact
+per-string annotations. The controlled full-band mixture used a deterministic
+non-guitar backing at 0.9 times the lead RMS.
 
-1. add an explicit “Install enhanced local models” action;
-2. benchmark both workers on a small set of the user's actual solos first; or
-3. keep the instant draft and invest in correction speed.
+- Enhanced Demucs + Basic Pitch: **0.666 note F1**
+- Fast preview + pYIN: **0.215 note F1**
+- Demucs separation: **8.69 dB median SI-SDR**
+- Preview separation: **4.40 dB median SI-SDR**
 
-No cloud account or API key is needed for any current SoloTrace feature.
+This makes Demucs + Basic Pitch the default installed route. It was about
+3.1 times better on note F1 and 7.5 times faster per track in this benchmark.
+Tab F1 remained 0.218 because audio cannot fully determine string/fret choice;
+the correction editor remains essential. See
+[`model-benchmark-results.md`](model-benchmark-results.md) for all 12 routes and
+[`public-benchmark-research.md`](public-benchmark-research.md) for source and
+licensing details.
+
+No cloud account or API key is needed.

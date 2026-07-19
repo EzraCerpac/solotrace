@@ -281,6 +281,83 @@ def _merge_note_fragments(
     return merged
 
 
+def build_rhythm_map(
+    rhythm_path: Path,
+    start_s: float,
+    end_s: float,
+    sample_rate: int,
+    hop_length: int = 256,
+) -> tuple[float, list[SyncAnchor]]:
+    rhythm_audio, _ = librosa.load(
+        rhythm_path,
+        sr=sample_rate,
+        mono=True,
+        offset=start_s,
+        duration=end_s - start_s,
+    )
+    start_frame = max(0, round(start_s * sample_rate))
+    end_frame = start_frame + len(rhythm_audio)
+    tempo_result, beat_frames = librosa.beat.beat_track(
+        y=rhythm_audio,
+        sr=sample_rate,
+        hop_length=hop_length,
+    )
+    tempo = float(np.asarray(tempo_result).reshape(-1)[0])
+    if not math.isfinite(tempo) or tempo < 35:
+        tempo = 120
+    beat_times = (
+        librosa.frames_to_time(
+            beat_frames,
+            sr=sample_rate,
+            hop_length=hop_length,
+        )
+        + start_s
+    )
+    quarter_seconds = 60 / tempo
+    anchors: list[SyncAnchor] = [
+        SyncAnchor(audio_frame=start_frame, score_tick=0),
+    ]
+    if len(beat_times):
+        first_tick = max(
+            1,
+            round((float(beat_times[0]) - start_s) / quarter_seconds * 480),
+        )
+        for index, beat_time in enumerate(beat_times):
+            frame = round(float(beat_time) * sample_rate)
+            if frame <= anchors[-1].audio_frame:
+                continue
+            anchors.append(
+                SyncAnchor(
+                    audio_frame=frame,
+                    score_tick=first_tick + index * 480,
+                )
+            )
+        if end_frame > anchors[-1].audio_frame:
+            remaining_ticks = round(
+                (end_frame - anchors[-1].audio_frame)
+                / sample_rate
+                / quarter_seconds
+                * 480
+            )
+            anchors.append(
+                SyncAnchor(
+                    audio_frame=end_frame,
+                    score_tick=anchors[-1].score_tick + max(1, remaining_ticks),
+                )
+            )
+    if len(anchors) < 2:
+        anchors = [
+            SyncAnchor(audio_frame=start_frame, score_tick=0),
+            SyncAnchor(
+                audio_frame=end_frame,
+                score_tick=round(
+                    len(rhythm_audio) / sample_rate / quarter_seconds * 480
+                ),
+            ),
+        ]
+    return tempo, anchors
+
+
 def transcribe_pyin(
     lead_path: Path,
     start_s: float,
@@ -390,66 +467,13 @@ def transcribe_pyin(
             "or choose a quieter passage."
         )
 
-    rhythm_audio = audio
-    if rhythm_path is not None:
-        rhythm_audio, _ = librosa.load(
-            rhythm_path,
-            sr=sample_rate,
-            mono=True,
-            offset=start_s,
-            duration=end_s - start_s,
-        )
-    tempo_result, beat_frames = librosa.beat.beat_track(
-        y=rhythm_audio, sr=sample_rate, hop_length=hop_length
+    tempo, anchors = build_rhythm_map(
+        rhythm_path or lead_path,
+        start_s,
+        end_s,
+        sample_rate,
+        hop_length,
     )
-    tempo = float(np.asarray(tempo_result).reshape(-1)[0])
-    if not math.isfinite(tempo) or tempo < 35:
-        tempo = 120
-    beat_times = librosa.frames_to_time(
-        beat_frames, sr=sample_rate, hop_length=hop_length
-    ) + start_s
-    quarter_seconds = 60 / tempo
-    anchors: list[SyncAnchor] = [
-        SyncAnchor(audio_frame=start_frame, score_tick=0),
-    ]
-    if len(beat_times):
-        first_tick = max(
-            1,
-            round((float(beat_times[0]) - start_s) / quarter_seconds * 480),
-        )
-        for index, time in enumerate(beat_times):
-            frame = round(float(time) * sample_rate)
-            if frame <= anchors[-1].audio_frame:
-                continue
-            anchors.append(
-                SyncAnchor(
-                    audio_frame=frame,
-                    score_tick=first_tick + index * 480,
-                )
-            )
-        if end_frame > anchors[-1].audio_frame:
-            remaining_ticks = round(
-                (end_frame - anchors[-1].audio_frame)
-                / sample_rate
-                / quarter_seconds
-                * 480
-            )
-            anchors.append(
-                SyncAnchor(
-                    audio_frame=end_frame,
-                    score_tick=anchors[-1].score_tick + max(1, remaining_ticks),
-                )
-            )
-    if len(anchors) < 2:
-        anchors = [
-            SyncAnchor(audio_frame=start_frame, score_tick=0),
-            SyncAnchor(
-                audio_frame=end_frame,
-                score_tick=round(
-                    len(rhythm_audio) / sample_rate / quarter_seconds * 480
-                ),
-            ),
-        ]
     timed_notes: list[NoteEvent] = []
     for note in raw_notes:
         tick = audio_frame_to_score_tick(note.onset_frame, anchors)
