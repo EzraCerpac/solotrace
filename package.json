@@ -1,0 +1,11 @@
+{
+  "name": "solotrace",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --dir web dev",
+    "build": "pnpm --dir web build",
+    "test:web": "pnpm --dir web test",
+    "check:web": "pnpm --dir web check"
+  }
+}
+

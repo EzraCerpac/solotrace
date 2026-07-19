@@ -1,0 +1,52 @@
+[tasks.install]
+description = "Install Python and web dependencies"
+run = [
+  "UV_CACHE_DIR=.uv-cache uv sync",
+  "pnpm --dir web install",
+]
+
+[tasks.server]
+description = "Run API and built web app"
+run = "UV_CACHE_DIR=.uv-cache uv run solotrace"
+
+[tasks.api]
+description = "Run API with reload"
+run = "UV_CACHE_DIR=.uv-cache uv run uvicorn solotrace.api:app --app-dir server --host 127.0.0.1 --port 8765 --reload"
+
+[tasks.web]
+description = "Run web app with reload"
+run = "pnpm --dir web dev"
+
+[tasks.dev]
+description = "Print the two development commands"
+run = """
+echo 'Terminal 1: mise run api'
+echo 'Terminal 2: mise run web'
+"""
+
+[tasks.test]
+description = "Run focused backend and frontend tests"
+depends = ["test-python", "test-web"]
+
+[tasks.test-python]
+run = "UV_CACHE_DIR=.uv-cache uv run pytest"
+
+[tasks.test-web]
+run = "pnpm --dir web test"
+
+[tasks.check]
+description = "Run lint, type checks, tests, and production build"
+depends = ["check-python", "check-web", "test"]
+
+[tasks.check-python]
+run = "UV_CACHE_DIR=.uv-cache uv run ruff check server tests"
+
+[tasks.check-web]
+run = [
+  "pnpm --dir web check",
+  "pnpm --dir web build",
+]
+
+[tasks.smoke-wheel]
+description = "Build and test the installed wheel with its bundled web app"
+run = "./scripts/smoke-wheel.sh"
