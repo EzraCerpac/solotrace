@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -125,7 +126,7 @@ def transcribe_basic_pitch(
     tuning: list[int],
     fret_count: int,
     workspace: Path,
-    worker_python: Path,
+    worker_command: tuple[str, ...],
     worker_script: Path,
 ) -> TabDocument:
     segment_path = workspace / "basic-pitch-input.wav"
@@ -139,7 +140,7 @@ def transcribe_basic_pitch(
     sf.write(segment_path, segment, sample_rate, subtype="PCM_16")
     result_path = workspace / "basic-pitch.json"
     command = [
-        str(worker_python),
+        *worker_command,
         str(worker_script),
         str(segment_path),
         str(result_path),
@@ -149,12 +150,20 @@ def transcribe_basic_pitch(
         str(float(librosa.midi_to_hz(max(tuning) + fret_count))),
     ]
     try:
+        worker_environment = os.environ.copy()
+        for name in (
+            "SOLOTRACE_LAUNCH_SECRET",
+            "SOLOTRACE_SESSION_SECRET",
+            "SOLOTRACE_MVSEP_API_TOKEN",
+        ):
+            worker_environment.pop(name, None)
         subprocess.run(
             command,
             check=True,
             capture_output=True,
             text=True,
             timeout=600,
+            env=worker_environment,
         )
     except subprocess.TimeoutExpired as error:
         raise AudioProcessingError("Enhanced note transcription took too long") from error

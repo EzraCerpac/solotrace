@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import threading
+import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
 from .models import Project, now_iso
 
 T = TypeVar("T")
+SCHEMA_VERSION = 1
 
 
 class RevisionConflictError(RuntimeError):
@@ -23,11 +27,14 @@ class ProjectStore:
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self.projects_dir = data_dir / "projects"
+        self.backups_dir = data_dir / "backups"
         self.database_path = data_dir / "solotrace.sqlite3"
         self._lock = threading.RLock()
         self.projects_dir.mkdir(parents=True, exist_ok=True)
+        self.backups_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.chmod(0o700)
         self.projects_dir.chmod(0o700)
+        self.backups_dir.chmod(0o700)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -41,8 +48,20 @@ class ProjectStore:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
+            current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if current_version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"SoloTrace data uses schema {current_version}; this app supports "
+                    f"schema {SCHEMA_VERSION}."
+                )
+            has_tables = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1"
+            ).fetchone()
+            if current_version < SCHEMA_VERSION and has_tables:
+                self._backup_connection(connection, label=f"schema-{current_version}")
             connection.executescript(
-                """
+                f"""
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS projects (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -61,9 +80,38 @@ class ProjectStore:
                     PRIMARY KEY (project_id, revision),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
+                PRAGMA user_version = {SCHEMA_VERSION};
+                COMMIT;
                 """
             )
         self.database_path.chmod(0o600)
+
+    def _backup_connection(self, connection: sqlite3.Connection, *, label: str) -> Path:
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        destination = self.backups_dir / f"solotrace-{timestamp}-{label}.sqlite3"
+        suffix = 1
+        while destination.exists():
+            destination = self.backups_dir / (
+                f"solotrace-{timestamp}-{label}-{suffix}.sqlite3"
+            )
+            suffix += 1
+        with sqlite3.connect(destination) as backup:
+            connection.backup(backup)
+        destination.chmod(0o600)
+        return destination
+
+    def backup(self, *, label: str = "manual") -> Path:
+        with self._lock, self._connect() as connection:
+            return self._backup_connection(connection, label=label)
+
+    def integrity_check(self) -> str:
+        with self._connect() as connection:
+            row = connection.execute("PRAGMA integrity_check").fetchone()
+        return str(row[0]) if row else "unknown"
+
+    def checkpoint(self) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def project_dir(self, project_id: str) -> Path:
         allowed = "abcdefghijklmnopqrstuvwxyz0123456789-"
@@ -177,6 +225,39 @@ class ProjectStore:
             updated = Project.model_validate(updated.model_dump(mode="python"))
             self._write(connection, updated, reason)
             return updated
+
+    def delete(self, project_id: str, *, expected_revision: int) -> None:
+        if not project_id or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+            for character in project_id
+        ):
+            raise ValueError("invalid project id")
+        directory = self.projects_dir / project_id
+        quarantine = self.projects_dir / f".deleting-{project_id}-{uuid.uuid4().hex[:8]}"
+        with self._lock:
+            if directory.exists():
+                directory.replace(quarantine)
+            try:
+                with self._connect() as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT revision FROM projects WHERE id = ?",
+                        (project_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise KeyError(project_id)
+                    if int(row["revision"]) != expected_revision:
+                        raise RevisionConflictError(
+                            f"Expected revision {expected_revision}, current revision is "
+                            f"{row['revision']}"
+                        )
+                    connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            except Exception:
+                if quarantine.exists() and not directory.exists():
+                    quarantine.replace(directory)
+                raise
+        if quarantine.exists():
+            shutil.rmtree(quarantine)
 
     def write_json_artifact(self, project_id: str, filename: str, value: T) -> Path:
         path = self.media_path(project_id, filename)

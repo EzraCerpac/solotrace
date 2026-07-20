@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 import subprocess
 import uuid
@@ -25,14 +26,21 @@ class AudioProcessingError(RuntimeError):
 
 
 def ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    return _executable("ffmpeg") is not None and _executable("ffprobe") is not None
+
+
+def _executable(name: str) -> str | None:
+    configured = os.environ.get(f"SOLOTRACE_{name.upper()}")
+    if configured and Path(configured).is_file():
+        return configured
+    return shutil.which(name)
 
 
 def probe_audio(path: Path) -> tuple[float, int]:
     if not ffmpeg_available():
         raise AudioProcessingError("FFmpeg is required to inspect uploaded audio")
     command = [
-        "ffprobe",
+        _executable("ffprobe") or "ffprobe",
         "-v",
         "error",
         "-select_streams",
@@ -76,7 +84,7 @@ def probe_audio(path: Path) -> tuple[float, int]:
 def canonicalize_audio(source: Path, destination: Path) -> tuple[float, int]:
     probe_audio(source)
     command = [
-        "ffmpeg",
+        _executable("ffmpeg") or "ffmpeg",
         "-nostdin",
         "-hide_banner",
         "-loglevel",

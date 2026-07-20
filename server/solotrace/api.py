@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hmac
+import os
+import secrets
+import shutil
 import tempfile
 import unicodedata
 import uuid
@@ -11,7 +15,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -19,13 +23,16 @@ from .audio import (
     AudioProcessingError,
     canonicalize_audio,
     ffmpeg_available,
+    probe_audio,
     waveform_peaks,
 )
-from .config import Settings, store_mvsep_token
+from .config import Settings, delete_mvsep_token, store_mvsep_token
 from .demo import DEMO_ID, ensure_demo
+from .diagnostics import configure_logging, diagnostic_bundle
 from .editing import normalize_edited_notes
 from .exports import export_filename, export_payload, write_bundle
 from .fingering import assign_fingerings
+from .imports import ProjectImportError, import_project_bundle
 from .models import (
     HealthResponse,
     MediaAsset,
@@ -40,6 +47,7 @@ from .models import (
 )
 from .pipeline import Pipeline, new_run
 from .storage import ProjectStore, RevisionConflictError
+from .version import APP_VERSION, BUILD_ID, PACKAGED
 
 ALLOWED_EXTENSIONS = {
     ".aac",
@@ -58,21 +66,34 @@ ALLOWED_EXTENSIONS = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings.load()
+    configure_logging(settings)
     store = ProjectStore(settings.data_dir)
     ensure_demo(store)
     pipeline = Pipeline(store, settings)
     app.state.settings = settings
     app.state.store = store
     app.state.pipeline = pipeline
-    yield
-    pipeline.close()
+    app.state.launch_secret = os.environ.get("SOLOTRACE_LAUNCH_SECRET")
+    app.state.session_secret = (
+        os.environ.get("SOLOTRACE_SESSION_SECRET") or secrets.token_urlsafe(32)
+        if app.state.launch_secret
+        else None
+    )
+    try:
+        yield
+    finally:
+        pipeline.close()
+        store.checkpoint()
 
 
 app = FastAPI(
     title="SoloTrace",
-    version="0.1.0",
+    version=APP_VERSION,
     description="Local-first synchronized guitar solo tab studio",
     lifespan=lifespan,
+    docs_url=None if PACKAGED else "/docs",
+    redoc_url=None if PACKAGED else "/redoc",
+    openapi_url=None if PACKAGED else "/openapi.json",
 )
 app.add_middleware(
     TrustedHostMiddleware,
@@ -98,6 +119,13 @@ async def safe_validation_error(
 
 @app.middleware("http")
 async def protect_local_mutations(request: Request, call_next):
+    if request.url.path.startswith(("/api", "/media")):
+        session_secret = getattr(request.app.state, "session_secret", None)
+        session = request.cookies.get("solotrace_session")
+        if session_secret and (
+            session is None or not hmac.compare_digest(session, session_secret)
+        ):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("origin")
         if origin:
@@ -125,6 +153,25 @@ async def protect_local_mutations(request: Request, call_next):
                     content={"detail": "Upload is larger than the configured limit."},
                 )
     return await call_next(request)
+
+
+@app.get("/bootstrap", include_in_schema=False)
+async def bootstrap(request: Request, token: str) -> RedirectResponse:
+    launch_secret = getattr(request.app.state, "launch_secret", None)
+    if not launch_secret or not hmac.compare_digest(token, launch_secret):
+        raise HTTPException(status_code=401, detail="Invalid launch token")
+    request.app.state.launch_secret = None
+    session_secret = request.app.state.session_secret
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        "solotrace_session",
+        session_secret,
+        httponly=True,
+        secure=False,
+        samesite="strict",
+        path="/",
+    )
+    return response
 
 
 def _store(request: Request) -> ProjectStore:
@@ -158,6 +205,9 @@ def capabilities(request: Request) -> dict[str, object]:
     settings = _settings(request)
     cloud = settings.cloud_pipeline_available
     return {
+        "appVersion": APP_VERSION,
+        "buildId": BUILD_ID,
+        "packaged": settings.packaged,
         "audio": {
             "ffmpeg": ffmpeg_available(),
             "maxUploadMb": settings.max_upload_bytes // 1024 // 1024,
@@ -169,10 +219,11 @@ def capabilities(request: Request) -> dict[str, object]:
                 "mvsep": cloud,
             },
             "notice": (
-                "MVSep isolates foreground lead guitar in its Germany cloud region. "
-                "Fast preview stays local and is used only when cloud processing is unavailable."
+                "Experimental MVSep lead estimate uploads only the selected range "
+                "to MVSep's Germany region after per-run consent."
             ),
             "maxDurationS": 600,
+            "previewMaxDurationS": 180,
             "consentRequired": True,
         },
         "transcription": {
@@ -183,6 +234,10 @@ def capabilities(request: Request) -> dict[str, object]:
             },
         },
         "cloudReady": cloud,
+        "cloud": {
+            "configured": bool(settings.mvsep_api_token),
+            "ready": cloud,
+        },
         "privacy": (
             "Imports stay local. Creating a cloud lead draft sends only the selected "
             "audio to MVSep after explicit consent."
@@ -190,8 +245,8 @@ def capabilities(request: Request) -> dict[str, object]:
     }
 
 
-@app.put("/api/settings/mvsep-token")
-def save_mvsep_token(body: MVSepTokenRequest, request: Request) -> dict[str, object]:
+@app.put("/api/settings/mvsep-key")
+def save_mvsep_key(body: MVSepTokenRequest, request: Request) -> dict[str, object]:
     try:
         store_mvsep_token(body.api_token)
     except RuntimeError as error:
@@ -203,6 +258,18 @@ def save_mvsep_token(body: MVSepTokenRequest, request: Request) -> dict[str, obj
         "stored": True,
         "cloudReady": settings.cloud_pipeline_available,
     }
+
+
+@app.delete("/api/settings/mvsep-key", status_code=204)
+def remove_mvsep_key(request: Request) -> Response:
+    try:
+        delete_mvsep_token()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    settings = Settings.load()
+    request.app.state.settings = settings
+    request.app.state.pipeline.settings = settings
+    return Response(status_code=204)
 
 
 @app.get("/api/projects", response_model=list[Project])
@@ -227,6 +294,16 @@ def _slug(value: str) -> str:
     )
     slug = "-".join(filter(None, slug.split("-")))
     return slug[:36] or "solo"
+
+
+def _ensure_decode_space(path: Path, data_dir: Path) -> None:
+    duration, _sample_rate = probe_audio(path)
+    decoded_bytes = int(duration * 44_100 * 2 * 2)
+    required = decoded_bytes * 3 + 64 * 1024 * 1024
+    if shutil.disk_usage(data_dir).free < required:
+        raise AudioProcessingError(
+            "Not enough free disk space to import this audio safely"
+        )
 
 
 @app.post("/api/projects", response_model=Project, status_code=201)
@@ -269,6 +346,7 @@ async def create_project(
                     output.write(chunk)
             if size == 0:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
+            await run_in_threadpool(_ensure_decode_space, upload_path, settings.data_dir)
             duration, sample_rate = await run_in_threadpool(
                 canonicalize_audio,
                 upload_path,
@@ -307,6 +385,70 @@ async def create_project(
         provenance=["Audio decoded locally with FFmpeg. No cloud upload."],
     )
     return store.put(project, reason="import audio")
+
+
+@app.post("/api/projects/import", response_model=Project, status_code=201)
+async def import_project(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+) -> Project:
+    settings = _settings(request)
+    store = _store(request)
+    filename = Path(file.filename or "").name
+    if not filename.lower().endswith(".solotrace.zip"):
+        raise HTTPException(status_code=415, detail="Choose a .solotrace.zip project")
+    size = 0
+    with tempfile.TemporaryDirectory(
+        prefix=".solotrace-bundle-import-",
+        dir=settings.data_dir,
+    ) as temporary_name:
+        bundle_path = Path(temporary_name) / "project.solotrace.zip"
+        try:
+            with bundle_path.open("xb") as output:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > settings.max_bundle_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="Project bundle is larger than the configured limit.",
+                        )
+                    output.write(chunk)
+            if size == 0:
+                raise HTTPException(status_code=400, detail="Project bundle is empty")
+            return await run_in_threadpool(
+                import_project_bundle,
+                store,
+                bundle_path,
+                max_expanded_bytes=settings.max_bundle_bytes,
+            )
+        except ProjectImportError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        finally:
+            await file.close()
+
+
+@app.delete("/api/projects/{project_id}", status_code=204)
+def delete_project(
+    project_id: str,
+    expected_revision: int,
+    request: Request,
+) -> Response:
+    if project_id == DEMO_ID:
+        raise HTTPException(status_code=409, detail="The built-in demo cannot be deleted")
+    store = _store(request)
+    _project_or_404(store, project_id)
+    if not request.app.state.pipeline.cancel_and_wait(project_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Draft is still stopping. Try deleting the project again.",
+        )
+    try:
+        store.delete(project_id, expected_revision)
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    return Response(status_code=204)
 
 
 @app.post("/api/projects/{project_id}/process", response_model=Project, status_code=202)
@@ -403,6 +545,17 @@ def patch_tab(project_id: str, body: TabPatch, request: Request) -> Project:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/diagnostics/export")
+def export_diagnostics(request: Request) -> Response:
+    payload = diagnostic_bundle(_settings(request), _store(request))
+    filename = f"solotrace-diagnostics-{APP_VERSION}.zip"
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/projects/{project_id}/export/{format_name}")

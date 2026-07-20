@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from platformdirs import user_data_path
+import keyring
+from keyring.errors import KeyringError, PasswordDeleteError
+from platformdirs import user_data_path, user_log_path
+
+from .version import BUILD_ID, PACKAGED
+
+KEYCHAIN_SERVICE = "com.ezracerpac.solotrace"
+KEYCHAIN_ACCOUNT = "mvsep"
 
 
 def store_mvsep_token(token: str) -> None:
@@ -16,54 +22,35 @@ def store_mvsep_token(token: str) -> None:
             "before starting SoloTrace on this platform."
         )
     try:
-        subprocess.run(
-            [
-                "security",
-                "add-generic-password",
-                "-a",
-                "solotrace",
-                "-s",
-                "com.solotrace.mvsep",
-                "-l",
-                "SoloTrace MVSep API token",
-                "-U",
-                "-w",
-                token,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, token)
+    except KeyringError as error:
         raise RuntimeError("Could not save MVSep token to macOS Keychain") from error
 
 
+def delete_mvsep_token() -> None:
+    if sys.platform != "darwin":
+        return
+    try:
+        keyring.delete_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+    except PasswordDeleteError:
+        return
+    except KeyringError as error:
+        raise RuntimeError("Could not remove MVSep token from macOS Keychain") from error
+
+
 def _mvsep_token() -> str | None:
-    configured = os.environ.get("SOLOTRACE_MVSEP_API_TOKEN")
+    configured = (
+        os.environ.get("SOLOTRACE_MVSEP_API_TOKEN") if not PACKAGED else None
+    )
     if configured is not None:
         return configured.strip() or None
     if sys.platform != "darwin":
         return None
     try:
-        result = subprocess.run(
-            [
-                "security",
-                "find-generic-password",
-                "-a",
-                "solotrace",
-                "-s",
-                "com.solotrace.mvsep",
-                "-w",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        value = keyring.get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+    except KeyringError:
         return None
-    return result.stdout.strip() or None if result.returncode == 0 else None
+    return value.strip() or None if value else None
 
 
 @dataclass(frozen=True)
@@ -77,10 +64,15 @@ class Settings:
     mvsep_api_base_url: str
     mvsep_poll_seconds: float
     mvsep_timeout_seconds: float
+    log_dir: Path = Path(".")
+    packaged: bool = False
+    build_id: str = "dev"
 
     @property
-    def basic_pitch_python(self) -> Path:
-        return self.worker_dir / "transcribe" / "bin" / "python"
+    def basic_pitch_command(self) -> tuple[str, ...]:
+        if self.packaged:
+            return (sys.executable, "--basic-pitch-worker")
+        return (str(self.worker_dir / "transcribe" / "bin" / "python"),)
 
     @property
     def basic_pitch_worker(self) -> Path:
@@ -88,11 +80,21 @@ class Settings:
 
     @property
     def basic_pitch_available(self) -> bool:
-        return self.basic_pitch_python.is_file() and self.basic_pitch_worker.is_file()
+        if self.packaged:
+            try:
+                __import__("basic_pitch")
+            except ImportError:
+                return False
+            return self.basic_pitch_worker.is_file()
+        return Path(self.basic_pitch_command[0]).is_file() and self.basic_pitch_worker.is_file()
 
     @property
     def cloud_pipeline_available(self) -> bool:
         return bool(self.mvsep_api_token) and self.basic_pitch_available
+
+    @property
+    def max_bundle_bytes(self) -> int:
+        return self.max_upload_bytes * 6
 
     @classmethod
     def load(cls) -> Settings:
@@ -126,4 +128,10 @@ class Settings:
             mvsep_timeout_seconds=float(
                 os.environ.get("SOLOTRACE_MVSEP_TIMEOUT_SECONDS", "1800")
             ),
+            log_dir=Path(
+                os.environ.get("SOLOTRACE_LOG_DIR")
+                or user_log_path("SoloTrace", "SoloTrace")
+            ).expanduser(),
+            packaged=PACKAGED,
+            build_id=BUILD_ID,
         )

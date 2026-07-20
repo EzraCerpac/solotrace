@@ -12,8 +12,11 @@ from xml.etree import ElementTree as ET
 import mido
 
 from .models import NoteEvent, Project
+from .version import APP_VERSION
 
 PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+PROJECT_FORMAT = "solotrace-project"
+PROJECT_SCHEMA_VERSION = 1
 
 
 def pitch_name(midi_pitch: int) -> str:
@@ -263,7 +266,13 @@ def midi(project: Project) -> bytes:
 
 
 def project_json(project: Project) -> bytes:
-    return (json.dumps(project.model_dump(mode="json"), indent=2) + "\n").encode()
+    envelope = {
+        "format": PROJECT_FORMAT,
+        "schemaVersion": PROJECT_SCHEMA_VERSION,
+        "appVersion": APP_VERSION,
+        "project": project.model_dump(mode="json"),
+    }
+    return (json.dumps(envelope, indent=2) + "\n").encode()
 
 
 def _bundle_asset_paths(project: Project, directory: Path) -> list[tuple[Path, str]]:

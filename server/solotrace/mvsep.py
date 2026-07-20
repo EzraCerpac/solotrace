@@ -94,6 +94,21 @@ class MVSepApi:
         try:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
+                final = urlparse(str(response.url))
+                if final.scheme != "https" or final.hostname not in _ALLOWED_DOWNLOAD_HOSTS:
+                    raise AudioProcessingError("MVSep redirected to an unsafe download URL")
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    try:
+                        declared_size = int(content_length)
+                    except ValueError as error:
+                        raise AudioProcessingError(
+                            "MVSep returned an invalid download size"
+                        ) from error
+                    if declared_size > _MAX_DOWNLOAD_BYTES:
+                        raise AudioProcessingError(
+                            "MVSep lead stem is unexpectedly large"
+                        )
                 with output_path.open("wb") as output:
                     for chunk in response.iter_bytes():
                         size += len(chunk)
@@ -263,6 +278,10 @@ def create_mvsep_stems(
         )
     except (OSError, RuntimeError) as error:
         raise AudioProcessingError("MVSep returned unreadable lead audio") from error
+    returned_duration = len(estimate) / estimate_rate
+    expected_duration = (end - start) / sample_rate
+    if abs(returned_duration - expected_duration) > max(0.25, expected_duration * 0.02):
+        raise AudioProcessingError("MVSep returned lead audio with the wrong duration")
     if estimate_rate != sample_rate:
         estimate = np.column_stack(
             [

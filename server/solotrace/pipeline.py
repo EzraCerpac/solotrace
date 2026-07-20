@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -206,6 +207,20 @@ class Pipeline:
             raise KeyError(project_id)
         return project
 
+    def cancel_and_wait(self, project_id: str, timeout_seconds: float = 15.0) -> bool:
+        with self._lock:
+            cancellation = self._project_cancellations.get(project_id)
+            if cancellation is None:
+                return True
+            cancellation.set()
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            with self._lock:
+                if project_id not in self._project_jobs:
+                    return True
+            time.sleep(0.05)
+        return False
+
     def _set_run(
         self,
         project_id: str,
@@ -366,7 +381,7 @@ class Pipeline:
                         tuning,
                         fret_count,
                         temporary,
-                        self.settings.basic_pitch_python,
+                        self.settings.basic_pitch_command,
                         self.settings.basic_pitch_worker,
                     )
                 else:
