@@ -33,10 +33,20 @@ from .models import (
     Passage,
     ProcessRequest,
     Project,
+    ProjectMutationRequest,
+    ProjectRenameRequest,
+    ProjectSummary,
+    ProjectView,
     RefingerRequest,
     RunState,
     TabDocument,
     TabPatch,
+    TabVersion,
+    TabVersionSummary,
+    VersionCreateRequest,
+    VersionRenameRequest,
+    WorkspacePatch,
+    now_iso,
 )
 from .pipeline import Pipeline, new_run
 from .storage import ProjectStore, RevisionConflictError
@@ -142,6 +152,86 @@ def _project_or_404(store: ProjectStore, project_id: str) -> Project:
     return project
 
 
+def _version_or_404(project: Project, version_id: str) -> TabVersion:
+    version = next(
+        (candidate for candidate in project.versions if candidate.id == version_id),
+        None,
+    )
+    if version is None:
+        raise HTTPException(status_code=404, detail="Tab version not found")
+    return version
+
+
+def _version_summary(version: TabVersion) -> TabVersionSummary:
+    return TabVersionSummary(
+        id=version.id,
+        name=version.name,
+        source=version.source,
+        fingering_mode=version.fingering_mode,
+        created_at=version.created_at,
+        updated_at=version.updated_at,
+        note_count=len(version.tab.notes),
+        needs_review_count=sum(
+            not note.reviewed and note.confidence.minimum < 0.72
+            for note in version.tab.notes
+        ),
+    )
+
+
+def _project_summary(project: Project) -> ProjectSummary:
+    active = _version_summary(project.active_version)
+    return ProjectSummary(
+        id=project.id,
+        title=project.title,
+        artist=project.artist,
+        updated_at=project.updated_at,
+        revision=project.revision,
+        duration_s=project.duration_s,
+        source_name=project.source_name,
+        demo=project.demo,
+        trashed_at=project.trashed_at,
+        active_version_id=project.active_version_id,
+        active_version_name=active.name,
+        note_count=active.note_count,
+        needs_review_count=active.needs_review_count,
+    )
+
+
+def _project_view(project: Project) -> ProjectView:
+    return ProjectView(
+        id=project.id,
+        title=project.title,
+        artist=project.artist,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        revision=project.revision,
+        duration_s=project.duration_s,
+        passage=project.passage,
+        assets=project.assets,
+        tab=project.tab,
+        versions=[_version_summary(version) for version in project.versions],
+        active_version_id=project.active_version_id,
+        run=project.run,
+        source_name=project.source_name,
+        demo=project.demo,
+        trashed_at=project.trashed_at,
+        separation_scope=project.separation_scope,
+        waveform_peaks=project.waveform_peaks,
+        provenance=project.provenance,
+    )
+
+
+def _unique_version_name(project: Project, preferred: str) -> str:
+    base = preferred.strip()
+    existing = {version.name.casefold() for version in project.versions}
+    if base.casefold() not in existing:
+        return base
+    index = 2
+    while f"{base} {index}".casefold() in existing:
+        index += 1
+    return f"{base} {index}"
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health(request: Request) -> HealthResponse:
     cloud = _settings(request).cloud_pipeline_available
@@ -205,14 +295,21 @@ def save_mvsep_token(body: MVSepTokenRequest, request: Request) -> dict[str, obj
     }
 
 
-@app.get("/api/projects", response_model=list[Project])
-def list_projects(request: Request) -> list[Project]:
-    return _store(request).list()
+@app.get("/api/projects", response_model=list[ProjectSummary])
+def list_projects(
+    request: Request,
+    include_trashed: bool = False,
+) -> list[ProjectSummary]:
+    return [
+        _project_summary(project)
+        for project in _store(request).list()
+        if include_trashed or project.trashed_at is None
+    ]
 
 
-@app.get("/api/projects/{project_id}", response_model=Project)
-def get_project(project_id: str, request: Request) -> Project:
-    return _project_or_404(_store(request), project_id)
+@app.get("/api/projects/{project_id}", response_model=ProjectView)
+def get_project(project_id: str, request: Request) -> ProjectView:
+    return _project_view(_project_or_404(_store(request), project_id))
 
 
 def _slug(value: str) -> str:
@@ -229,7 +326,7 @@ def _slug(value: str) -> str:
     return slug[:36] or "solo"
 
 
-@app.post("/api/projects", response_model=Project, status_code=201)
+@app.post("/api/projects", response_model=ProjectView, status_code=201)
 async def create_project(
     request: Request,
     file: Annotated[UploadFile, File()],
@@ -300,31 +397,41 @@ async def create_project(
                 method="Local FFmpeg decode",
             )
         ],
-        tab=TabDocument(sample_rate=sample_rate),
+        versions=[
+            TabVersion(
+                id="version-original",
+                name="Original draft",
+                source="import",
+                tab=TabDocument(sample_rate=sample_rate),
+            )
+        ],
+        active_version_id="version-original",
         run=run,
         source_name=filename,
         waveform_peaks=peaks,
         provenance=["Audio decoded locally with FFmpeg. No cloud upload."],
     )
-    return store.put(project, reason="import audio")
+    return _project_view(store.put(project, reason="import audio"))
 
 
-@app.post("/api/projects/{project_id}/process", response_model=Project, status_code=202)
+@app.post("/api/projects/{project_id}/process", response_model=ProjectView, status_code=202)
 def process_project(
     project_id: str,
     body: ProcessRequest,
     request: Request,
 ) -> Project:
     try:
-        return request.app.state.pipeline.start(
-            project_id,
-            start_s=body.start_s,
-            end_s=body.end_s,
-            tuning=body.tuning,
-            fret_count=body.fret_count,
-            expected_revision=body.expected_revision,
-            engine=body.engine,
-            cloud_consent=body.cloud_consent,
+        return _project_view(
+            request.app.state.pipeline.start(
+                project_id,
+                start_s=body.start_s,
+                end_s=body.end_s,
+                tuning=body.tuning,
+                fret_count=body.fret_count,
+                expected_revision=body.expected_revision,
+                engine=body.engine,
+                cloud_consent=body.cloud_consent,
+            )
         )
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Project not found") from error
@@ -334,43 +441,172 @@ def process_project(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
-@app.post("/api/projects/{project_id}/process/cancel", response_model=Project)
-def cancel_process(project_id: str, request: Request) -> Project:
+@app.post("/api/projects/{project_id}/process/cancel", response_model=ProjectView)
+def cancel_process(project_id: str, request: Request) -> ProjectView:
     try:
-        return request.app.state.pipeline.cancel(project_id)
+        return _project_view(request.app.state.pipeline.cancel(project_id))
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Project not found") from error
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
-@app.post("/api/projects/{project_id}/refinger", response_model=Project)
-def refinger_project(
+@app.patch("/api/projects/{project_id}", response_model=ProjectView)
+def rename_project(
     project_id: str,
-    body: RefingerRequest,
+    body: ProjectRenameRequest,
     request: Request,
-) -> Project:
-    store = _store(request)
-
-    def update(project: Project) -> Project:
-        notes = assign_fingerings(
-            project.tab.notes,
-            project.tab.tuning,
-            project.tab.fret_count,
-            body.mode,
-        )
-        return project.model_copy(
-            update={"tab": project.tab.model_copy(update={"notes": notes})}
-        )
-
+) -> ProjectView:
     try:
-        return store.update(
+        project = _store(request).update(
             project_id,
-            update,
-            reason=f"refinger {body.mode}",
+            lambda current: current.model_copy(
+                update={"title": body.title.strip(), "artist": body.artist.strip()}
+            ),
+            reason="rename project",
             expected_revision=body.expected_revision,
             bump_revision=True,
         )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.delete("/api/projects/{project_id}", response_model=ProjectView)
+def trash_project(
+    project_id: str,
+    body: ProjectMutationRequest,
+    request: Request,
+) -> ProjectView:
+    try:
+        project = _store(request).update(
+            project_id,
+            lambda current: current.model_copy(update={"trashed_at": now_iso()}),
+            reason="trash project",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/restore", response_model=ProjectView)
+def restore_project(
+    project_id: str,
+    body: ProjectMutationRequest,
+    request: Request,
+) -> ProjectView:
+    try:
+        project = _store(request).update(
+            project_id,
+            lambda current: current.model_copy(update={"trashed_at": None}),
+            reason="restore project",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.patch("/api/projects/{project_id}/workspace", response_model=ProjectView)
+def patch_workspace(
+    project_id: str,
+    body: WorkspacePatch,
+    request: Request,
+) -> ProjectView:
+    try:
+        project = _store(request).update(
+            project_id,
+            lambda current: current.model_copy(update={"passage": body.passage}),
+            reason="update marked passage",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+def _create_version(project: Project, body: VersionCreateRequest) -> Project:
+    if len(project.versions) >= 100:
+        raise ValueError("A project can contain at most 100 tab versions")
+    source = _version_or_404(project, body.source_version_id)
+    mode = body.mode
+    notes = source.tab.notes
+    if mode is not None:
+        unlocked = [
+            note.model_copy(update={"user_locked": False})
+            for note in source.tab.notes
+        ]
+        arranged = assign_fingerings(
+            unlocked,
+            source.tab.tuning,
+            source.tab.fret_count,
+            mode,
+        )
+        notes = [
+            note.model_copy(
+                update={
+                    "reviewed": (
+                        previous.reviewed
+                        if (previous.string, previous.fret) == (note.string, note.fret)
+                        else False
+                    ),
+                    "user_locked": False,
+                }
+            )
+            for previous, note in zip(source.tab.notes, arranged, strict=True)
+        ]
+    default_names = {
+        None: f"{source.name} copy",
+        "balanced": "Balanced",
+        "easiest": "Easiest",
+        "position": "One position",
+    }
+    name = _unique_version_name(project, body.name or default_names[mode])
+    timestamp = now_iso()
+    version = TabVersion(
+        id=f"version-{uuid.uuid4().hex[:12]}",
+        name=name,
+        source="duplicate" if mode is None else f"refinger-{mode}",
+        fingering_mode=source.fingering_mode if mode is None else mode,
+        created_at=timestamp,
+        updated_at=timestamp,
+        tab=source.tab.model_copy(update={"notes": notes}),
+    )
+    return project.model_copy(
+        update={
+            "versions": [*project.versions, version],
+            "active_version_id": version.id,
+        }
+    )
+
+
+@app.post("/api/projects/{project_id}/versions", response_model=ProjectView)
+def create_version(
+    project_id: str,
+    body: VersionCreateRequest,
+    request: Request,
+) -> ProjectView:
+    try:
+        project = _store(request).update(
+            project_id,
+            lambda current: _create_version(current, body),
+            reason=f"create tab version {body.mode or 'duplicate'}",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Project not found") from error
     except RevisionConflictError as error:
@@ -379,24 +615,156 @@ def refinger_project(
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
-@app.patch("/api/projects/{project_id}/tab", response_model=Project)
-def patch_tab(project_id: str, body: TabPatch, request: Request) -> Project:
-    store = _store(request)
-
+@app.post(
+    "/api/projects/{project_id}/versions/{version_id}/activate",
+    response_model=ProjectView,
+)
+def activate_version(
+    project_id: str,
+    version_id: str,
+    body: ProjectMutationRequest,
+    request: Request,
+) -> ProjectView:
     def update(project: Project) -> Project:
-        notes = normalize_edited_notes(project, body.notes)
+        _version_or_404(project, version_id)
+        return project.model_copy(update={"active_version_id": version_id})
+
+    try:
+        project = _store(request).update(
+            project_id,
+            update,
+            reason="activate tab version",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.patch(
+    "/api/projects/{project_id}/versions/{version_id}",
+    response_model=ProjectView,
+)
+def rename_version(
+    project_id: str,
+    version_id: str,
+    body: VersionRenameRequest,
+    request: Request,
+) -> ProjectView:
+    def update(project: Project) -> Project:
+        _version_or_404(project, version_id)
+        requested = body.name.strip()
+        if any(
+            version.id != version_id and version.name.casefold() == requested.casefold()
+            for version in project.versions
+        ):
+            raise ValueError("Tab version names must be unique")
+        versions = [
+            version.model_copy(update={"name": requested, "updated_at": now_iso()})
+            if version.id == version_id
+            else version
+            for version in project.versions
+        ]
+        return project.model_copy(update={"versions": versions})
+
+    try:
+        project = _store(request).update(
+            project_id,
+            update,
+            reason="rename tab version",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.delete(
+    "/api/projects/{project_id}/versions/{version_id}",
+    response_model=ProjectView,
+)
+def delete_version(
+    project_id: str,
+    version_id: str,
+    body: ProjectMutationRequest,
+    request: Request,
+) -> ProjectView:
+    def update(project: Project) -> Project:
+        _version_or_404(project, version_id)
+        if len(project.versions) == 1:
+            raise ValueError("Keep at least one tab version")
+        versions = [version for version in project.versions if version.id != version_id]
+        active_id = (
+            versions[0].id
+            if project.active_version_id == version_id
+            else project.active_version_id
+        )
         return project.model_copy(
-            update={"tab": project.tab.model_copy(update={"notes": notes})}
+            update={"versions": versions, "active_version_id": active_id}
         )
 
     try:
-        return store.update(
+        project = _store(request).update(
+            project_id,
+            update,
+            reason="delete tab version",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.patch(
+    "/api/projects/{project_id}/versions/{version_id}/notes",
+    response_model=ProjectView,
+)
+def patch_tab(
+    project_id: str,
+    version_id: str,
+    body: TabPatch,
+    request: Request,
+) -> ProjectView:
+    def update(project: Project) -> Project:
+        _version_or_404(project, version_id)
+        target = project.model_copy(update={"active_version_id": version_id})
+        notes = normalize_edited_notes(target, body.notes)
+        timestamp = now_iso()
+        versions = [
+            version.model_copy(
+                update={
+                    "tab": version.tab.model_copy(update={"notes": notes}),
+                    "updated_at": timestamp,
+                }
+            )
+            if version.id == version_id
+            else version
+            for version in project.versions
+        ]
+        return project.model_copy(update={"versions": versions})
+
+    try:
+        project = _store(request).update(
             project_id,
             update,
             reason="edit notes",
             expected_revision=body.expected_revision,
             bump_revision=True,
         )
+        return _project_view(project)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Project not found") from error
     except RevisionConflictError as error:
@@ -405,10 +773,36 @@ def patch_tab(project_id: str, body: TabPatch, request: Request) -> Project:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+@app.post("/api/projects/{project_id}/refinger", response_model=ProjectView)
+def refinger_project(
+    project_id: str,
+    body: RefingerRequest,
+    request: Request,
+) -> ProjectView:
+    project = _project_or_404(_store(request), project_id)
+    return create_version(
+        project_id,
+        VersionCreateRequest(
+            expected_revision=body.expected_revision,
+            source_version_id=project.active_version_id,
+            mode=body.mode,
+        ),
+        request,
+    )
+
+
 @app.get("/api/projects/{project_id}/export/{format_name}")
-def export_project(project_id: str, format_name: str, request: Request) -> Response:
+def export_project(
+    project_id: str,
+    format_name: str,
+    request: Request,
+    version_id: str | None = None,
+) -> Response:
     store = _store(request)
     project = _project_or_404(store, project_id)
+    if version_id is not None:
+        _version_or_404(project, version_id)
+        project = project.model_copy(update={"active_version_id": version_id})
     if format_name == "bundle":
         try:
             filename = export_filename(project, format_name)

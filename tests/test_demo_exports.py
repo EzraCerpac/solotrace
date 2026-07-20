@@ -42,7 +42,7 @@ def test_exports_are_parseable_and_native_bundle_keeps_audio(tmp_path) -> None:
     with zipfile.ZipFile(io.BytesIO(bundle(project, directory))) as archive:
         names = set(archive.namelist())
     assert f"{project.id}/project.json" in names
-    assert f"{project.id}/tab.musicxml" in names
+    assert f"{project.id}/versions/{project.active_version_id}/tab.musicxml" in names
     assert f"{project.id}/audio/backing.wav" in names
 
 
@@ -62,7 +62,7 @@ def test_musicxml_respects_denominator_tempo_and_splits_cross_measure_note(tmp_p
             "notes": [crossing_note],
         }
     )
-    project = project.model_copy(update={"tab": tab})
+    project = project.replace_active_tab(tab)
 
     root = ET.fromstring(musicxml(project))
     measures = root.findall("./part/measure")
@@ -132,8 +132,8 @@ def test_text_tab_keeps_colliding_tokens_and_bend_range(tmp_path) -> None:
             "fret": 12,
         }
     )
-    project = project.model_copy(
-        update={"tab": project.tab.model_copy(update={"notes": [first, second]})}
+    project = project.replace_active_tab(
+        project.tab.model_copy(update={"notes": [first, second]})
     )
 
     text = ascii_tab(project, width=24)

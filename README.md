@@ -15,10 +15,13 @@ positions a guitarist used.
 - Import common audio formats and transcribe the whole lead or a marked passage.
 - Create a local transcription draft with exact audio times and score times.
 - Switch between full mix, estimated lead, and backing audio without losing position.
-- Edit string, fret, timing, pitch, technique, and confidence per note.
-- Regenerate only the fingering as balanced, easiest, or position-focused.
+- Accept, edit, reopen, delete, and undo low-confidence notes.
+- Keep named tab versions; switching style creates a new balanced, easiest, or
+  position-focused version without replacing the source.
+- Rename, trash, restore, and reopen song projects.
 - Loop a passage and slow playback while preserving pitch.
-- Export native project JSON, MusicXML 4.0, MIDI, ASCII tab, or a ZIP with audio.
+- Export the active tab as JSON, MusicXML 4.0, MIDI, or ASCII; export one bundle
+  containing every version and the shared audio.
 - Start instantly with the exact-stem `Northbound Lights` synthetic demo.
 
 Uploaded songs use one selected route:
@@ -36,7 +39,7 @@ audio. Only the selected range is uploaded.
 ```mermaid
 flowchart LR
   UI["React tracing table"] --> API["FastAPI local service"]
-  API --> DB["SQLite revisions"]
+  API --> DB["SQLite projects, versions, reviews"]
   API --> MEDIA["Project audio files"]
   API --> PIPE["Single processing pipeline"]
   PIPE --> SEP["MVSep lead separation"]
@@ -142,8 +145,17 @@ SoloTrace/
         └── backing-run-<id>.wav
 ```
 
-Generated proposals and user edits receive distinct revisions. A stale editor
-gets HTTP `409` instead of silently overwriting a newer revision.
+Each song stores shared audio and named tab versions. Notes keep model confidence
+separate from the musician's reviewed/unreviewed decision. A project-wide
+revision token protects every edit, version action, title, trash state, and
+marked passage; a stale editor gets HTTP `409` instead of silently overwriting
+newer work. Processing and draft-style actions always create a new version.
+Projects in Trash remain recoverable.
+
+The browser remembers the last project plus track, speed, loop, and draft scope.
+SQLite remains the source of truth for projects, versions, note reviews, names,
+marked passages, and trash state. Playback position and note selection
+intentionally reset when reopening.
 Data/project directories are created owner-only; the SQLite file is owner-readable
 and owner-writable.
 

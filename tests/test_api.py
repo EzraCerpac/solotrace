@@ -28,6 +28,9 @@ def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatc
         assert project["run"]["state"] == "complete"
         assert project["demo"] is True
         assert len(project["tab"]["notes"]) >= 12
+        summary = client.get("/api/projects").json()[0]
+        assert "tab" not in summary
+        assert summary["active_version_name"] == "Demo tab"
 
         media = client.get(f"/media/{DEMO_ID}/backing.wav", headers={"Range": "bytes=0-31"})
         assert media.status_code == 206
@@ -64,16 +67,22 @@ def test_revision_conflict_protects_concurrent_note_edits(tmp_path, monkeypatch)
     monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path))
     with TestClient(app) as client:
         project = client.get(f"/api/projects/{DEMO_ID}").json()
-        revision = project["tab"]["revision"]
+        revision = project["revision"]
         payload = {
             "expected_revision": revision,
             "notes": project["tab"]["notes"],
         }
-        first = client.patch(f"/api/projects/{DEMO_ID}/tab", json=payload)
+        first = client.patch(
+            f"/api/projects/{DEMO_ID}/versions/{project['active_version_id']}/notes",
+            json=payload,
+        )
         assert first.status_code == 200
-        assert first.json()["tab"]["revision"] == revision + 1
+        assert first.json()["revision"] == revision + 1
 
-        stale = client.patch(f"/api/projects/{DEMO_ID}/tab", json=payload)
+        stale = client.patch(
+            f"/api/projects/{DEMO_ID}/versions/{project['active_version_id']}/notes",
+            json=payload,
+        )
         assert stale.status_code == 409
         assert "current revision" in stale.json()["detail"]
 
@@ -90,9 +99,9 @@ def test_note_patch_normalizes_both_clocks_and_fingering(tmp_path, monkeypatch) 
             "fret": 0,
         }
         response = client.patch(
-            f"/api/projects/{DEMO_ID}/tab",
+            f"/api/projects/{DEMO_ID}/versions/{project['active_version_id']}/notes",
             json={
-                "expected_revision": project["tab"]["revision"],
+                "expected_revision": project["revision"],
                 "notes": [changed, *project["tab"]["notes"][1:]],
             },
         )
@@ -120,10 +129,10 @@ def test_non_finite_patch_is_rejected_without_corrupting_project(
         project = client.get(f"/api/projects/{DEMO_ID}").json()
         project["tab"]["notes"][0]["pitch_curve_cents"] = [float("nan")]
         response = client.patch(
-            f"/api/projects/{DEMO_ID}/tab",
+            f"/api/projects/{DEMO_ID}/versions/{project['active_version_id']}/notes",
             content=json.dumps(
                 {
-                    "expected_revision": project["tab"]["revision"],
+                    "expected_revision": project["revision"],
                     "notes": project["tab"]["notes"],
                 }
             ),
@@ -132,7 +141,7 @@ def test_non_finite_patch_is_rejected_without_corrupting_project(
         assert response.status_code == 422
         readable = client.get(f"/api/projects/{DEMO_ID}")
         assert readable.status_code == 200
-        assert readable.json()["tab"]["revision"] == project["tab"]["revision"]
+        assert readable.json()["revision"] == project["revision"]
 
 
 def test_local_origin_guard_and_reserved_api_routes(tmp_path, monkeypatch) -> None:
@@ -142,7 +151,7 @@ def test_local_origin_guard_and_reserved_api_routes(tmp_path, monkeypatch) -> No
         blocked = client.post(
             f"/api/projects/{DEMO_ID}/refinger",
             json={
-                "expected_revision": project["tab"]["revision"],
+                "expected_revision": project["revision"],
                 "mode": "balanced",
             },
             headers={"Origin": "https://attacker.example"},
@@ -163,7 +172,7 @@ def test_request_models_reject_unknown_fields(tmp_path, monkeypatch) -> None:
         response = client.post(
             f"/api/projects/{DEMO_ID}/refinger",
             json={
-                "expected_revision": project["tab"]["revision"],
+                "expected_revision": project["revision"],
                 "mode": "balanced",
                 "mdoe": "easiest",
             },

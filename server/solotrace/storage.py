@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import threading
 from collections.abc import Callable
@@ -101,7 +102,7 @@ class ProjectStore:
                 project.id,
                 project.title,
                 project.updated_at,
-                project.tab.revision,
+                project.revision,
                 document,
             ),
         )
@@ -113,7 +114,7 @@ class ProjectStore:
             """,
             (
                 project.id,
-                project.tab.revision,
+                project.revision,
                 project.updated_at,
                 reason,
                 document,
@@ -141,6 +142,36 @@ class ProjectStore:
             ).fetchall()
         return [Project.model_validate_json(row["document"]) for row in rows]
 
+    def merge_from(self, source: ProjectStore) -> list[str]:
+        """Merge newer projects and their declared media from another library."""
+        merged: list[str] = []
+        for candidate in source.list():
+            current = self.get(candidate.id)
+            if current is not None and current.revision >= candidate.revision:
+                continue
+
+            media: list[tuple[Path, Path]] = []
+            for asset in candidate.assets:
+                source_path = source.media_path(candidate.id, asset.filename)
+                if not source_path.is_file():
+                    raise FileNotFoundError(
+                        f"declared {asset.role} asset is missing: {source_path}"
+                    )
+                media.append(
+                    (source_path, self.media_path(candidate.id, asset.filename))
+                )
+
+            for source_path, destination_path in media:
+                temporary = destination_path.with_suffix(
+                    destination_path.suffix + ".merge"
+                )
+                shutil.copy2(source_path, temporary)
+                temporary.replace(destination_path)
+                destination_path.chmod(0o600)
+            self.put(candidate, reason=f"merge from {source.data_dir}")
+            merged.append(candidate.id)
+        return merged
+
     def update(
         self,
         project_id: str,
@@ -159,19 +190,15 @@ class ProjectStore:
             if row is None:
                 raise KeyError(project_id)
             project = Project.model_validate_json(row["document"])
-            if expected_revision is not None and project.tab.revision != expected_revision:
+            if expected_revision is not None and project.revision != expected_revision:
                 raise RevisionConflictError(
                     f"Expected revision {expected_revision}, current revision is "
-                    f"{project.tab.revision}"
+                    f"{project.revision}"
                 )
             updated = update(project)
             if bump_revision:
                 updated = updated.model_copy(
-                    update={
-                        "tab": updated.tab.model_copy(
-                            update={"revision": project.tab.revision + 1}
-                        )
-                    }
+                    update={"revision": project.revision + 1}
                 )
             updated = updated.model_copy(update={"updated_at": now_iso()})
             updated = Project.model_validate(updated.model_dump(mode="python"))

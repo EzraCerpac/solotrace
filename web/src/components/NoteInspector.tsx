@@ -9,6 +9,9 @@ interface NoteInspectorProps {
   saving: boolean
   onClose: () => void
   onSave: (note: NoteEvent) => void
+  onAccept: (note: NoteEvent) => void
+  onDelete: (note: NoteEvent) => void
+  onReopen: (note: NoteEvent) => void
   onAudition: (note: NoteEvent) => void
 }
 
@@ -19,6 +22,9 @@ export function NoteInspector({
   saving,
   onClose,
   onSave,
+  onAccept,
+  onDelete,
+  onReopen,
   onAudition,
 }: NoteInspectorProps) {
   const [draft, setDraft] = useState(note)
@@ -32,7 +38,8 @@ export function NoteInspector({
     onSave({
       ...draft,
       audio_offset_s: Math.max(draft.audio_onset_s + 0.01, draft.audio_offset_s),
-      user_locked: true,
+      user_locked: false,
+      reviewed: true,
     })
   }
 
@@ -51,7 +58,36 @@ export function NoteInspector({
         <Icon name="play" />
         Hear this note in context
       </button>
-      <form onSubmit={submit}>
+      <div className="review-action-bar">
+        {draft.reviewed ? (
+          <button type="button" className="button secondary" disabled={saving} onClick={() => onReopen(draft)}>
+            Reopen review
+          </button>
+        ) : (
+          <button type="button" className="button primary" disabled={saving} onClick={() => onAccept(draft)}>
+            <Icon name="check" />
+            Accept
+          </button>
+        )}
+        <button
+          className="button secondary"
+          type="submit"
+          form="note-editor-form"
+          disabled={saving}
+        >
+          <Icon name="save" />
+          Save changes
+        </button>
+        <button
+          className="button danger-text"
+          type="button"
+          disabled={saving}
+          onClick={() => onDelete(draft)}
+        >
+          Delete note
+        </button>
+      </div>
+      <form id="note-editor-form" onSubmit={submit}>
         <fieldset>
           <legend>Position</legend>
           <div className="current-fingering">
@@ -169,10 +205,6 @@ export function NoteInspector({
             ))}
           </div>
         </fieldset>
-        <button type="submit" className="button primary inspector-save" disabled={saving}>
-          <Icon name="save" />
-          {saving ? 'Saving…' : 'Save note'}
-        </button>
       </form>
     </aside>
   )

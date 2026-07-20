@@ -15,9 +15,19 @@ time. Sync anchors connect both. Quantization never destroys the original onset.
 
 ## Versioned tab document
 
-Generated output is a proposal. User changes make a new revision. Updates include
-the revision they started from; stale updates fail with `409`. Regeneration can
-therefore never silently erase repairs.
+Each song project owns shared audio and a shelf of named tab versions. A version
+owns its notes, fingering mode, origin, timestamps, and review counts. Generated
+output is a proposal: processing creates a new `Lead draft N`, and a style action
+derives a new version. Neither operation overwrites an edited source.
+
+Confidence is model evidence. `reviewed` is the musician's decision and is stored
+separately on each note. Refingering preserves review state when a note stays on
+the same string/fret and reopens it when that position moves.
+
+All mutations include one project-wide revision token; stale updates fail with
+`409`. SQLite persists projects, versions, reviews, marked passages, and
+recoverable Trash state. Browser local storage only remembers workspace
+preferences; playback position and note selection reset on reopen.
 
 ## One model seam
 

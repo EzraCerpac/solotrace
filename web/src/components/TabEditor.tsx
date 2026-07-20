@@ -24,7 +24,8 @@ const side = 64
 function noteLabel(note: NoteEvent): string {
   const confidence = Math.round(minimumConfidence(note.confidence) * 100)
   const technique = note.techniques.length ? `, ${note.techniques.join(', ')}` : ''
-  return `${pitchName(note.midi_pitch)}, string ${note.string}, fret ${note.fret}, ${confidence}% confidence${technique}`
+  const review = note.reviewed ? ', reviewed' : ''
+  return `${pitchName(note.midi_pitch)}, string ${note.string}, fret ${note.fret}, ${confidence}% confidence${technique}${review}`
 }
 
 export function TabEditor({
@@ -152,6 +153,7 @@ export function TabEditor({
         <p className="tab-legend">
           <span className="legend-mark certain" /> Confident
           <span className="legend-mark review" /> Needs review
+          <span className="legend-mark reviewed" /> Reviewed
         </p>
       </div>
       {project.tab.notes.length === 0 ? (
@@ -230,7 +232,8 @@ export function TabEditor({
               const selected = selectedNoteId === note.id
               const playing =
                 currentTime >= note.audio_onset_s && currentTime <= note.audio_offset_s
-              const needsReview = minimumConfidence(note.confidence) < 0.72
+              const needsReview =
+                !note.reviewed && minimumConfidence(note.confidence) < 0.72
               return (
                 <g
                   key={note.id}
@@ -239,6 +242,7 @@ export function TabEditor({
                     selected ? 'selected' : '',
                     playing ? 'playing' : '',
                     needsReview ? 'needs-review' : '',
+                    note.reviewed ? 'reviewed' : '',
                     disabled ? 'is-disabled' : '',
                   ].join(' ')}
                   role="button"

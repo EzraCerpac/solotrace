@@ -35,6 +35,7 @@ export interface NoteEvent {
   confidence: Confidence
   alternatives: Fingering[]
   user_locked: boolean
+  reviewed: boolean
 }
 
 export interface SyncAnchor {
@@ -43,7 +44,6 @@ export interface SyncAnchor {
 }
 
 export interface TabDocument {
-  revision: number
   sample_rate: number
   ticks_per_quarter: number
   tempo_bpm: number
@@ -52,6 +52,33 @@ export interface TabDocument {
   fret_count: number
   sync_anchors: SyncAnchor[]
   notes: NoteEvent[]
+}
+
+export interface TabVersionSummary {
+  id: string
+  name: string
+  source: string
+  fingering_mode: FingeringMode
+  created_at: string
+  updated_at: string
+  note_count: number
+  needs_review_count: number
+}
+
+export interface ProjectSummary {
+  id: string
+  title: string
+  artist: string
+  updated_at: string
+  revision: number
+  duration_s: number
+  source_name: string
+  demo: boolean
+  trashed_at: string | null
+  active_version_id: string
+  active_version_name: string
+  note_count: number
+  needs_review_count: number
 }
 
 export interface PipelineStage {
@@ -92,13 +119,17 @@ export interface Project {
   artist: string
   created_at: string
   updated_at: string
+  revision: number
   duration_s: number
   passage: Passage
   assets: MediaAsset[]
   tab: TabDocument
+  versions: TabVersionSummary[]
+  active_version_id: string
   run: ProcessingRun
   source_name: string
   demo: boolean
+  trashed_at: string | null
   separation_scope: 'solo-guitar' | 'all-guitar' | 'preview' | 'exact'
   waveform_peaks: number[]
   provenance: string[]

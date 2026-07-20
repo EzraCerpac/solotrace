@@ -262,8 +262,15 @@ def midi(project: Project) -> bytes:
     return output.getvalue()
 
 
-def project_json(project: Project) -> bytes:
-    return (json.dumps(project.model_dump(mode="json"), indent=2) + "\n").encode()
+def project_json(project: Project, *, all_versions: bool = False) -> bytes:
+    payload = project.model_dump(mode="json")
+    if not all_versions:
+        payload["versions"] = [
+            version
+            for version in payload["versions"]
+            if version["id"] == project.active_version_id
+        ]
+    return (json.dumps(payload, indent=2) + "\n").encode()
 
 
 def _bundle_asset_paths(project: Project, directory: Path) -> list[tuple[Path, str]]:
@@ -292,10 +299,16 @@ def _write_bundle(
     project: Project,
     asset_paths: list[tuple[Path, str]],
 ) -> None:
-    archive.writestr(f"{project.id}/project.json", project_json(project))
-    archive.writestr(f"{project.id}/tab.musicxml", musicxml(project))
-    archive.writestr(f"{project.id}/reference.mid", midi(project))
-    archive.writestr(f"{project.id}/tab.txt", ascii_tab(project))
+    archive.writestr(
+        f"{project.id}/project.json",
+        project_json(project, all_versions=True),
+    )
+    for version in project.versions:
+        version_project = project.model_copy(update={"active_version_id": version.id})
+        version_root = f"{project.id}/versions/{version.id}"
+        archive.writestr(f"{version_root}/tab.musicxml", musicxml(version_project))
+        archive.writestr(f"{version_root}/reference.mid", midi(version_project))
+        archive.writestr(f"{version_root}/tab.txt", ascii_tab(version_project))
     for path, archive_name in asset_paths:
         archive.write(path, archive_name)
 

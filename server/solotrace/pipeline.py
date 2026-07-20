@@ -19,6 +19,7 @@ from .models import (
     Project,
     RunState,
     StageState,
+    TabVersion,
     now_iso,
 )
 from .mvsep import MVSepCancelled, create_mvsep_stems
@@ -129,10 +130,10 @@ class Pipeline:
             raise KeyError(project_id)
         if end_s > project.duration_s + 0.01:
             raise ValueError("solo end exceeds the song duration")
-        if project.tab.revision != expected_revision:
+        if project.revision != expected_revision:
             raise RevisionConflictError(
                 f"Expected revision {expected_revision}, current revision is "
-                f"{project.tab.revision}"
+                f"{project.revision}"
             )
         maximum = 600 if engine == "mvsep" else 180
         if end_s - start_s > maximum:
@@ -464,6 +465,22 @@ class Pipeline:
                         "updated_at": now_iso(),
                     }
                 )
+                existing_names = {version.name.casefold() for version in project.versions}
+                version_name = "Lead draft"
+                suffix = 2
+                while version_name.casefold() in existing_names:
+                    version_name = f"Lead draft {suffix}"
+                    suffix += 1
+                timestamp = now_iso()
+                version = TabVersion(
+                    id=f"version-{uuid.uuid4().hex[:12]}",
+                    name=version_name,
+                    source="mvsep" if cloud else "preview",
+                    fingering_mode="balanced",
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                    tab=tab,
+                )
                 return project.model_copy(
                     update={
                         "assets": assets,
@@ -472,7 +489,8 @@ class Pipeline:
                             start_s=start_s,
                             end_s=end_s,
                         ),
-                        "tab": tab.model_copy(update={"revision": project.tab.revision + 1}),
+                        "versions": [*project.versions, version],
+                        "active_version_id": version.id,
                         "run": complete_run,
                         "separation_scope": "solo-guitar" if cloud else "preview",
                         "provenance": (
@@ -508,6 +526,7 @@ class Pipeline:
                     finish,
                     reason="create draft",
                     expected_revision=base_revision,
+                    bump_revision=True,
                 )
             completed = True
             for filename in superseded:
