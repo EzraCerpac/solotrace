@@ -1,8 +1,9 @@
 export type AssetRole = 'original' | 'lead' | 'backing'
-export type RunState = 'idle' | 'queued' | 'running' | 'complete' | 'failed'
+export type RunState = 'idle' | 'queued' | 'running' | 'complete' | 'failed' | 'cancelled'
 export type StageState = 'pending' | 'running' | 'complete' | 'failed' | 'skipped'
 export type FingeringMode = 'balanced' | 'easiest' | 'position'
-export type DraftEngine = 'enhanced' | 'preview'
+export type DraftEngine = 'mvsep' | 'preview'
+export type DraftScope = 'whole' | 'passage'
 
 export interface Confidence {
   pitch: number
@@ -112,9 +113,11 @@ export interface Capabilities {
     selected: string
     available: {
       preview: boolean
-      demucsMlx: boolean
+      mvsep: boolean
     }
     notice: string
+    maxDurationS: number
+    consentRequired: boolean
   }
   transcription: {
     selected: string
@@ -123,6 +126,6 @@ export interface Capabilities {
       basicPitch: boolean
     }
   }
-  enhancedReady: boolean
+  cloudReady: boolean
   privacy: string
 }

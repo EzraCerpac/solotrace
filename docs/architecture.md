@@ -19,16 +19,21 @@ Generated output is a proposal. User changes make a new revision. Updates includ
 the revision they started from; stale updates fail with `409`. Regeneration can
 therefore never silently erase repairs.
 
-## One future model seam
+## One model seam
 
-Separation is the first justified future adapter boundary because local and cloud
-implementations return meaningfully different stems. The shipped path stays
-direct—preview separation plus pYIN—until an optional worker is installed and
-actually wired. Capabilities report only the path the pipeline can run.
+Separation is the only network boundary. The selected route is MVSep's
+role-aware one-stage Lead/Rhythm model; it returns a foreground lead estimate,
+while backing is created locally as original minus lead. Spotify Basic Pitch,
+beat mapping, fingering, persistence, editing, and export remain local.
 
-Current built-in preview uses center-focused harmonic filtering. Its output is
-labeled `preview`. A guitar separator must label output `all-guitar` unless it
-can prove that rhythm guitar remains.
+Capabilities expose MVSep only when both its Keychain/environment token and the
+local Basic Pitch worker are available. Otherwise the app falls back to its
+center-focused preview and pYIN. MVSep output is labeled `solo-guitar`; preview
+output remains labeled `preview`.
+
+Each cloud request carries explicit user consent. MVSep polling runs inside the
+existing single-worker pipeline and supports cancellation, so no second queue,
+database, or service is needed.
 
 ## URL import deferred
 

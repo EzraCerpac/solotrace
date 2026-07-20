@@ -21,7 +21,7 @@ from .audio import (
     ffmpeg_available,
     waveform_peaks,
 )
-from .config import Settings
+from .config import Settings, store_mvsep_token
 from .demo import DEMO_ID, ensure_demo
 from .editing import normalize_edited_notes
 from .exports import export_filename, export_payload, write_bundle
@@ -29,6 +29,7 @@ from .fingering import assign_fingerings
 from .models import (
     HealthResponse,
     MediaAsset,
+    MVSepTokenRequest,
     Passage,
     ProcessRequest,
     Project,
@@ -143,11 +144,11 @@ def _project_or_404(store: ProjectStore, project_id: str) -> Project:
 
 @app.get("/api/health", response_model=HealthResponse)
 def health(request: Request) -> HealthResponse:
-    enhanced = _settings(request).enhanced_models_available
+    cloud = _settings(request).cloud_pipeline_available
     return HealthResponse(
         ffmpeg=ffmpeg_available(),
-        separator="demucs-mlx" if enhanced else "preview",
-        transcriber="basic-pitch" if enhanced else "pyin",
+        separator="mvsep-one-stage" if cloud else "preview",
+        transcriber="basic-pitch" if cloud else "pyin",
         demo_project_id=DEMO_ID,
     )
 
@@ -155,32 +156,52 @@ def health(request: Request) -> HealthResponse:
 @app.get("/api/capabilities")
 def capabilities(request: Request) -> dict[str, object]:
     settings = _settings(request)
-    enhanced = settings.enhanced_models_available
+    cloud = settings.cloud_pipeline_available
     return {
         "audio": {
             "ffmpeg": ffmpeg_available(),
             "maxUploadMb": settings.max_upload_bytes // 1024 // 1024,
         },
         "separation": {
-            "selected": "demucsMlx" if enhanced else "preview",
+            "selected": "mvsep" if cloud else "preview",
             "available": {
                 "preview": True,
-                "demucsMlx": enhanced,
+                "mvsep": cloud,
             },
             "notice": (
-                "Demucs estimates every guitar in the marked passage, not just the "
-                "solo. Fast preview uses frequency filtering."
+                "MVSep isolates foreground lead guitar in its Germany cloud region. "
+                "Fast preview stays local and is used only when cloud processing is unavailable."
             ),
+            "maxDurationS": 600,
+            "consentRequired": True,
         },
         "transcription": {
-            "selected": "basicPitch" if enhanced else "pyin",
+            "selected": "basicPitch" if cloud else "pyin",
             "available": {
                 "pyin": True,
-                "basicPitch": enhanced,
+                "basicPitch": settings.basic_pitch_available,
             },
         },
-        "enhancedReady": enhanced,
-        "privacy": "Audio stays on this machine.",
+        "cloudReady": cloud,
+        "privacy": (
+            "Imports stay local. Creating a cloud lead draft sends only the selected "
+            "audio to MVSep after explicit consent."
+        ),
+    }
+
+
+@app.put("/api/settings/mvsep-token")
+def save_mvsep_token(body: MVSepTokenRequest, request: Request) -> dict[str, object]:
+    try:
+        store_mvsep_token(body.api_token)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    settings = Settings.load()
+    request.app.state.settings = settings
+    request.app.state.pipeline.settings = settings
+    return {
+        "stored": True,
+        "cloudReady": settings.cloud_pipeline_available,
     }
 
 
@@ -303,12 +324,23 @@ def process_project(
             fret_count=body.fret_count,
             expected_revision=body.expected_revision,
             engine=body.engine,
+            cloud_consent=body.cloud_consent,
         )
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Project not found") from error
     except RevisionConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/process/cancel", response_model=Project)
+def cancel_process(project_id: str, request: Request) -> Project:
+    try:
+        return request.app.state.pipeline.cancel(project_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

@@ -63,7 +63,7 @@ export function UploadDialog({
       <form onSubmit={submit}>
         <div className="dialog-heading">
           <div>
-            <p className="eyebrow">Local import</p>
+            <p className="eyebrow">Private library</p>
             <h2>Choose a song</h2>
           </div>
           <button
@@ -118,7 +118,8 @@ export function UploadDialog({
           </label>
         </div>
         <p className="privacy-note">
-          Audio stays on this machine. SoloTrace does not upload it or fetch remote URLs.
+          Import stays on this machine. Creating a lead draft later sends only your
+          selected range to MVSep after you confirm.
         </p>
         {error && (
           <p className="form-error" role="alert">
@@ -137,4 +138,3 @@ export function UploadDialog({
     </dialog>
   )
 }
-

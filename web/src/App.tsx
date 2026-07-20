@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, ApiError } from './api'
 import { Icon } from './components/Icon'
+import { MVSepDialog } from './components/MVSepDialog'
 import { NoteInspector } from './components/NoteInspector'
 import { PipelineStrip } from './components/PipelineStrip'
 import { TabEditor } from './components/TabEditor'
@@ -12,7 +13,7 @@ import { formatTime, minimumConfidence, pitchName } from './music'
 import type {
   AssetRole,
   Capabilities,
-  DraftEngine,
+  DraftScope,
   Fingering,
   FingeringMode,
   NoteEvent,
@@ -32,7 +33,8 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [project, setProject] = useState<Project | null>(null)
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null)
-  const [draftEngine, setDraftEngine] = useState<DraftEngine>('preview')
+  const [draftScope, setDraftScope] = useState<DraftScope>('whole')
+  const [cloudConsent, setCloudConsent] = useState(false)
   const [loading, setLoading] = useState(true)
   const [track, setTrack] = useState<AssetRole>('original')
   const [currentTime, setCurrentTime] = useState(0)
@@ -42,6 +44,7 @@ function App() {
   const [passage, setPassage] = useState<Passage | null>(null)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [mvsepOpen, setMvsepOpen] = useState(false)
   const [railOpen, setRailOpen] = useState(false)
   const [mobileLayout, setMobileLayout] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -57,7 +60,6 @@ function App() {
       ])
       setProjects(nextProjects)
       setCapabilities(nextCapabilities)
-      setDraftEngine(nextCapabilities.enhancedReady ? 'enhanced' : 'preview')
       const initial =
         nextProjects.find((candidate) => candidate.demo) ?? nextProjects.at(0) ?? null
       setProject(initial)
@@ -102,7 +104,14 @@ function App() {
           schedule(800)
         } else {
           if (next.run.state === 'complete') setPassage(next.passage)
-          setNotice(next.run.state === 'complete' ? 'Draft ready' : '')
+          setCloudConsent(false)
+          setNotice(
+            next.run.state === 'complete'
+              ? 'Draft ready'
+              : next.run.state === 'cancelled'
+                ? 'Draft cancelled'
+                : '',
+          )
         }
       } catch (pollError) {
         if (!cancelled) {
@@ -225,6 +234,13 @@ function App() {
         .sort((left, right) => left.audio_onset_s - right.audio_onset_s) ?? [],
     [project],
   )
+  const selectedStart = draftScope === 'whole' ? 0 : passage?.start_s ?? 0
+  const selectedEnd = draftScope === 'whole' ? project?.duration_s ?? 0 : passage?.end_s ?? 0
+  const selectedDuration = Math.max(0, selectedEnd - selectedStart)
+  const cloudReady = capabilities?.cloudReady ?? false
+  const selectionTooLong =
+    selectedDuration > (cloudReady ? capabilities?.separation.maxDurationS ?? 600 : 180)
+  const processing = ['queued', 'running'].includes(project?.run.state ?? '')
 
   const adoptProject = (next: Project, includePassage = true) => {
     setProject(next)
@@ -293,14 +309,20 @@ function App() {
   const createDraft = async () => {
     if (!project || !passage) return
     setError('')
+    const engine = capabilities?.cloudReady ? 'mvsep' : 'preview'
+    const selectedPassage =
+      draftScope === 'whole'
+        ? { start_s: 0, end_s: project.duration_s }
+        : passage
     try {
       const next = await api.processProject(
         project.id,
-        passage,
+        selectedPassage,
         project.tab.tuning,
         project.tab.fret_count,
         project.tab.revision,
-        draftEngine,
+        engine,
+        engine === 'mvsep' && cloudConsent,
       )
       adoptProject(next, false)
     } catch (draftError) {
@@ -338,6 +360,8 @@ function App() {
     setCurrentTime(0)
     setSelectedNoteId(null)
     setRailOpen(false)
+    setDraftScope(next.duration_s <= 600 ? 'whole' : 'passage')
+    setCloudConsent(false)
     if (mobileLayout) {
       window.requestAnimationFrame(() => menuButtonRef.current?.focus())
     }
@@ -470,34 +494,20 @@ function App() {
             <span>{project.tab.fret_count} frets</span>
           </div>
           <div className="rail-group">
-            <p className="rail-label">Draft engine</p>
+            <p className="rail-label">Lead engine</p>
+            <strong>{capabilities?.cloudReady ? 'MVSep one-stage' : 'Offline preview'}</strong>
+            <span>
+              {capabilities?.cloudReady
+                ? 'Cloud separation · local transcription'
+                : 'MVSep or Basic Pitch unavailable'}
+            </span>
             <button
               type="button"
-              className={`rail-choice engine-choice ${
-                draftEngine === 'enhanced' ? 'active' : ''
-              }`}
-              disabled={saving || !capabilities?.enhancedReady}
-              aria-pressed={draftEngine === 'enhanced'}
-              onClick={() => setDraftEngine('enhanced')}
-            >
-              <strong>Enhanced local</strong>
-              <small>
-                {capabilities?.enhancedReady
-                  ? 'Demucs + Basic Pitch'
-                  : 'Models not installed'}
-              </small>
-            </button>
-            <button
-              type="button"
-              className={`rail-choice engine-choice ${
-                draftEngine === 'preview' ? 'active' : ''
-              }`}
+              className="rail-choice"
               disabled={saving}
-              aria-pressed={draftEngine === 'preview'}
-              onClick={() => setDraftEngine('preview')}
+              onClick={() => setMvsepOpen(true)}
             >
-              <strong>Fast preview</strong>
-              <small>Frequency filter + pYIN</small>
+              {capabilities?.cloudReady ? 'Replace API key' : 'Add API key'}
             </button>
           </div>
           <div className="rail-group">
@@ -535,15 +545,33 @@ function App() {
                 : project.separation_scope === 'preview'
                   ? 'Local preview'
                   : project.separation_scope === 'all-guitar'
-                    ? 'Demucs guitar stem'
-                    : 'Guitar separator'}
+                    ? 'Combined guitar stem'
+                    : 'MVSep lead stem'}
             </strong>
-            <span>Audio stays local</span>
+            <span>
+              {project.separation_scope === 'solo-guitar'
+                ? 'Selected audio processed by MVSep'
+                : 'Audio processed locally'}
+            </span>
           </div>
         </aside>
 
         <main className="editor">
-          <PipelineStrip run={project.run} />
+          <PipelineStrip
+            run={project.run}
+            onCancel={() => {
+              void api
+                .cancelProcess(project.id)
+                .then((next) => adoptProject(next, false))
+                .catch((cancelError) =>
+                  setError(
+                    cancelError instanceof Error
+                      ? cancelError.message
+                      : 'Could not cancel draft',
+                  ),
+                )
+            }}
+          />
           <section className="track-toolbar" aria-label="Audio source">
             <div className="track-switcher">
               {(
@@ -599,21 +627,70 @@ function App() {
               onSeek={seek}
             />
             <div className="draft-action-row">
-              <div>
-                <span>
-                  {formatTime(passage.start_s)}–{formatTime(passage.end_s)}
-                </span>
-                <small>{(passage.end_s - passage.start_s).toFixed(1)} second solo</small>
+              <div className="draft-scope">
+                <div className="draft-scope-switcher" role="group" aria-label="Lead range">
+                  <button
+                    type="button"
+                    className={draftScope === 'whole' ? 'active' : ''}
+                    aria-pressed={draftScope === 'whole'}
+                    disabled={
+                      project.duration_s >
+                      (cloudReady ? capabilities?.separation.maxDurationS ?? 600 : 180)
+                    }
+                    onClick={() => setDraftScope('whole')}
+                  >
+                    Whole lead
+                  </button>
+                  <button
+                    type="button"
+                    className={draftScope === 'passage' ? 'active' : ''}
+                    aria-pressed={draftScope === 'passage'}
+                    onClick={() => setDraftScope('passage')}
+                  >
+                    Marked passage
+                  </button>
+                </div>
+                <div className="draft-range">
+                  <span>
+                    {formatTime(selectedStart)}–{formatTime(selectedEnd)}
+                  </span>
+                  <small>
+                    {selectedDuration.toFixed(1)} seconds
+                    {selectionTooLong
+                      ? ` · maximum ${cloudReady ? '10' : '3'} minutes`
+                      : ''}
+                  </small>
+                </div>
               </div>
-              <button
-                className="button primary"
-                type="button"
-                disabled={['queued', 'running'].includes(project.run.state)}
-                onClick={() => void createDraft()}
-              >
-                <Icon name="spark" />
-                {project.tab.notes.length ? 'Rebuild draft' : 'Create draft'}
-              </button>
+              <div className="draft-submit">
+                {cloudReady && (
+                  <label className="cloud-consent">
+                    <input
+                      type="checkbox"
+                      checked={cloudConsent}
+                      onChange={(event) => setCloudConsent(event.target.checked)}
+                    />
+                    <span>I have rights to this audio. Send selected range to MVSep.</span>
+                  </label>
+                )}
+                <button
+                  className="button primary"
+                  type="button"
+                  disabled={
+                    processing || selectionTooLong || (cloudReady && !cloudConsent)
+                  }
+                  onClick={() => void createDraft()}
+                >
+                  <Icon name="spark" />
+                  {project.tab.notes.length
+                    ? draftScope === 'whole'
+                      ? 'Rebuild full lead'
+                      : 'Rebuild passage'
+                    : draftScope === 'whole'
+                      ? 'Create full lead'
+                      : 'Create passage'}
+                </button>
+              </div>
             </div>
             <TabEditor
               project={project}
@@ -670,7 +747,21 @@ function App() {
           adoptProject(next)
           setTrack('original')
           setCurrentTime(0)
+          setDraftScope(next.duration_s <= 600 ? 'whole' : 'passage')
+          setCloudConsent(false)
           return next
+        }}
+      />
+
+      <MVSepDialog
+        open={mvsepOpen}
+        onClose={() => setMvsepOpen(false)}
+        onSave={async (token) => {
+          await api.saveMvsepToken(token)
+          const nextCapabilities = await api.capabilities()
+          setCapabilities(nextCapabilities)
+          setCloudConsent(false)
+          setNotice('MVSep API key saved to Keychain')
         }}
       />
 

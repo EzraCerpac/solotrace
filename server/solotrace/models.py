@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-ProcessingEngine = Literal["preview", "enhanced"]
+ProcessingEngine = Literal["preview", "mvsep"]
 
 
 def now_iso() -> str:
@@ -116,6 +116,7 @@ class RunState(StrEnum):
     running = "running"
     complete = "complete"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class ProcessingRun(StrictModel):
@@ -177,13 +178,18 @@ class ProcessRequest(StrictModel):
     fret_count: int = Field(default=22, ge=12, le=36)
     expected_revision: int = Field(ge=1)
     engine: ProcessingEngine = "preview"
+    cloud_consent: bool = False
 
     @model_validator(mode="after")
     def validate_range(self) -> ProcessRequest:
         if self.end_s <= self.start_s:
-            raise ValueError("solo end must be after its start")
-        if self.end_s - self.start_s > 180:
-            raise ValueError("Mark a solo no longer than 3 minutes")
+            raise ValueError("passage end must be after its start")
+        maximum = 600 if self.engine == "mvsep" else 180
+        if self.end_s - self.start_s > maximum:
+            minutes = maximum // 60
+            raise ValueError(f"Selected passage must be no longer than {minutes} minutes")
+        if self.engine == "mvsep" and not self.cloud_consent:
+            raise ValueError("Confirm MVSep cloud processing before creating this draft")
         if max(self.tuning) + self.fret_count > 127:
             raise ValueError("tuning plus fret count exceeds the MIDI range")
         return self
@@ -197,6 +203,10 @@ class ProcessRequest(StrictModel):
 class RefingerRequest(StrictModel):
     mode: Literal["balanced", "easiest", "position"] = "balanced"
     expected_revision: int = Field(ge=1)
+
+
+class MVSepTokenRequest(StrictModel):
+    api_token: str = Field(min_length=20, max_length=256, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class TabPatch(StrictModel):

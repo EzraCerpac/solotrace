@@ -38,6 +38,13 @@ export const api = {
 
   capabilities: () => request<Capabilities>('/api/capabilities'),
 
+  saveMvsepToken: (apiToken: string) =>
+    request<{ stored: boolean; cloudReady: boolean }>('/api/settings/mvsep-token', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_token: apiToken }),
+    }),
+
   createProject: (file: File, title: string, artist: string) => {
     const body = new FormData()
     body.set('file', file)
@@ -53,6 +60,7 @@ export const api = {
     fretCount: number,
     expectedRevision: number,
     engine: DraftEngine,
+    cloudConsent: boolean,
   ) =>
     request<Project>(`/api/projects/${encodeURIComponent(projectId)}/process`, {
       method: 'POST',
@@ -63,7 +71,13 @@ export const api = {
         fret_count: fretCount,
         expected_revision: expectedRevision,
         engine,
+        cloud_consent: cloudConsent,
       }),
+    }),
+
+  cancelProcess: (projectId: string) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}/process/cancel`, {
+      method: 'POST',
     }),
 
   patchNotes: (projectId: string, expectedRevision: number, notes: NoteEvent[]) =>

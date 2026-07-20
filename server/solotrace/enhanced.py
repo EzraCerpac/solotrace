@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import subprocess
 import uuid
 from pathlib import Path
@@ -20,125 +19,6 @@ def _command_error(error: subprocess.CalledProcessError, fallback: str) -> str:
     output = error.stderr if isinstance(error.stderr, str) else ""
     lines = output.strip().splitlines()
     return lines[-1] if lines else fallback
-
-
-def create_enhanced_stems(
-    original_path: Path,
-    lead_path: Path,
-    backing_path: Path,
-    start_s: float,
-    end_s: float,
-    workspace: Path,
-    demucs_executable: Path,
-) -> tuple[int, float]:
-    info = sf.info(original_path)
-    sample_rate = info.samplerate
-    start = max(0, round(start_s * sample_rate))
-    end = min(info.frames, round(end_s * sample_rate))
-    if end - start < sample_rate // 5:
-        raise AudioProcessingError("Selected solo is too short")
-    passage_path = workspace / "passage.wav"
-    with sf.SoundFile(original_path) as source:
-        source.seek(start)
-        passage = source.read(end - start, always_2d=True, dtype="float32")
-    sf.write(passage_path, passage, sample_rate, subtype="PCM_16")
-
-    output_dir = workspace / "demucs"
-    command = [
-        str(demucs_executable),
-        "-n",
-        "htdemucs_6s",
-        "-o",
-        str(output_dir),
-        "--shifts",
-        "0",
-        "--overlap",
-        "0.25",
-        "--batch-size",
-        "1",
-        "--write-workers",
-        "1",
-        "--prefetch-tracks",
-        "0",
-        str(passage_path),
-    ]
-    try:
-        subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise AudioProcessingError("Enhanced guitar separation took too long") from error
-    except subprocess.CalledProcessError as error:
-        raise AudioProcessingError(
-            _command_error(error, "Enhanced guitar separation failed")
-        ) from error
-
-    estimate_path = output_dir / passage_path.stem / "guitar.wav"
-    if not estimate_path.is_file():
-        raise AudioProcessingError("Enhanced separator did not return a guitar stem")
-    estimate, estimate_rate = sf.read(estimate_path, always_2d=True, dtype="float32")
-    if estimate_rate != sample_rate:
-        estimate = np.column_stack(
-            [
-                librosa.resample(
-                    estimate[:, channel],
-                    orig_sr=estimate_rate,
-                    target_sr=sample_rate,
-                )
-                for channel in range(estimate.shape[1])
-            ]
-        )
-    if estimate.shape[1] == 1 and info.channels > 1:
-        estimate = np.repeat(estimate, info.channels, axis=1)
-    estimate = estimate[: end - start, : info.channels]
-    if len(estimate) < end - start:
-        estimate = np.pad(estimate, ((0, end - start - len(estimate)), (0, 0)))
-    fade = min(round(sample_rate * 0.12), len(estimate) // 2)
-    if fade:
-        curve = 0.5 - 0.5 * np.cos(np.linspace(0, math.pi, fade))
-        estimate[:fade] *= curve[:, None]
-        estimate[-fade:] *= curve[::-1, None]
-
-    block_size = 65_536
-    cursor = 0
-    with (
-        sf.SoundFile(original_path) as source,
-        sf.SoundFile(
-            lead_path,
-            mode="w",
-            samplerate=sample_rate,
-            channels=info.channels,
-            subtype="PCM_16",
-        ) as lead_output,
-        sf.SoundFile(
-            backing_path,
-            mode="w",
-            samplerate=sample_rate,
-            channels=info.channels,
-            subtype="PCM_16",
-        ) as backing_output,
-    ):
-        while True:
-            block = source.read(block_size, always_2d=True, dtype="float32")
-            if len(block) == 0:
-                break
-            lead_block = np.zeros_like(block)
-            overlap_start = max(cursor, start)
-            overlap_end = min(cursor + len(block), end)
-            if overlap_end > overlap_start:
-                source_left = overlap_start - start
-                source_right = overlap_end - start
-                block_left = overlap_start - cursor
-                block_right = overlap_end - cursor
-                lead_block[block_left:block_right] = estimate[source_left:source_right]
-            lead_output.write(np.clip(lead_block, -1, 1))
-            backing_output.write(np.clip(block - lead_block, -1, 1))
-            cursor += len(block)
-    return sample_rate, info.frames / sample_rate
 
 
 def _techniques(curve: list[float]) -> list[str]:

@@ -1,7 +1,13 @@
 import { Icon } from './Icon'
 import type { ProcessingRun } from '../types'
 
-export function PipelineStrip({ run }: { run: ProcessingRun }) {
+export function PipelineStrip({
+  run,
+  onCancel,
+}: {
+  run: ProcessingRun
+  onCancel: () => void
+}) {
   if (run.state === 'complete') return null
   return (
     <section
@@ -15,6 +21,11 @@ export function PipelineStrip({ run }: { run: ProcessingRun }) {
           <strong>{run.message}</strong>
           {run.error && <span>{run.error}</span>}
         </div>
+        {['queued', 'running'].includes(run.state) && (
+          <button type="button" className="button secondary" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
       </div>
       <ol>
         {run.stages.map((stage) => (
@@ -32,4 +43,3 @@ export function PipelineStrip({ run }: { run: ProcessingRun }) {
     </section>
   )
 }
-

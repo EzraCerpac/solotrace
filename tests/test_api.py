@@ -11,6 +11,7 @@ from solotrace.fingering import legal_fingerings
 def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SOLOTRACE_WORKER_DIR", str(tmp_path / "missing-workers"))
+    monkeypatch.setenv("SOLOTRACE_MVSEP_API_TOKEN", "")
     with TestClient(app) as client:
         health = client.get("/api/health")
         assert health.status_code == 200
@@ -18,8 +19,8 @@ def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatc
         assert health.json()["separator"] == "preview"
 
         capabilities = client.get("/api/capabilities").json()
-        assert capabilities["enhancedReady"] is False
-        assert capabilities["separation"]["available"]["demucsMlx"] is False
+        assert capabilities["cloudReady"] is False
+        assert capabilities["separation"]["available"]["mvsep"] is False
 
         response = client.get(f"/api/projects/{DEMO_ID}")
         assert response.status_code == 200
@@ -31,6 +32,32 @@ def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatc
         media = client.get(f"/media/{DEMO_ID}/backing.wav", headers={"Range": "bytes=0-31"})
         assert media.status_code == 206
         assert len(media.content) == 32
+
+
+def test_mvsep_token_endpoint_stores_secret_without_returning_it(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    worker_dir = tmp_path / "workers"
+    basic_pitch = worker_dir / "transcribe" / "bin" / "python"
+    basic_pitch.parent.mkdir(parents=True)
+    basic_pitch.touch()
+    stored: list[str] = []
+    monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SOLOTRACE_WORKER_DIR", str(worker_dir))
+    monkeypatch.setenv("SOLOTRACE_MVSEP_API_TOKEN", "configured-token-1234567890")
+    monkeypatch.setattr("solotrace.api.store_mvsep_token", stored.append)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/settings/mvsep-token",
+            json={"api_token": "replacement-token-1234567890"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"stored": True, "cloudReady": True}
+    assert "replacement-token-1234567890" not in response.text
+    assert stored == ["replacement-token-1234567890"]
 
 
 def test_revision_conflict_protects_concurrent_note_edits(tmp_path, monkeypatch) -> None:

@@ -6,7 +6,7 @@ run = [
 ]
 
 [tasks.install-models]
-description = "Install enhanced local Demucs and Basic Pitch workers"
+description = "Install local Basic Pitch transcription worker"
 run = "./scripts/install-enhanced-models.sh"
 
 [tasks.server]

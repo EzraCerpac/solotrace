@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .audio import AudioProcessingError, create_preview_stems, transcribe_pyin
 from .config import Settings
-from .enhanced import create_enhanced_stems, transcribe_basic_pitch
+from .enhanced import transcribe_basic_pitch
 from .models import (
     MediaAsset,
     Passage,
@@ -21,6 +21,7 @@ from .models import (
     StageState,
     now_iso,
 )
+from .mvsep import MVSepCancelled, create_mvsep_stems
 from .storage import ProjectStore, RevisionConflictError
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ def new_run() -> ProcessingRun:
         state=RunState.queued,
         message="Waiting to create draft",
         stages=[
-            PipelineStage(id="separate", label="Separate guitar"),
+            PipelineStage(id="separate", label="Separate lead guitar"),
             PipelineStage(id="hear", label="Hear notes"),
             PipelineStage(id="rhythm", label="Match rhythm"),
             PipelineStage(id="fingering", label="Choose frets"),
@@ -50,6 +51,7 @@ class Pipeline:
         self.settings = settings or Settings.load()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="solotrace")
         self._project_jobs: dict[str, str] = {}
+        self._project_cancellations: dict[str, threading.Event] = {}
         self._lock = threading.RLock()
         self._closing = False
         self._recover_interrupted_runs()
@@ -58,6 +60,8 @@ class Pipeline:
         with self._lock:
             self._closing = True
             active = list(self._project_jobs.items())
+            for event in self._project_cancellations.values():
+                event.set()
         self.executor.shutdown(wait=False, cancel_futures=True)
         for project_id, run_id in active:
             self._interrupt(project_id, run_id)
@@ -116,6 +120,7 @@ class Pipeline:
         fret_count: int,
         expected_revision: int,
         engine: ProcessingEngine = "preview",
+        cloud_consent: bool = False,
     ) -> Project:
         if self._closing:
             raise RuntimeError("SoloTrace is shutting down")
@@ -129,12 +134,17 @@ class Pipeline:
                 f"Expected revision {expected_revision}, current revision is "
                 f"{project.tab.revision}"
             )
-        if end_s - start_s > 180:
-            raise ValueError("Mark a solo no longer than 3 minutes")
-        if engine == "enhanced" and not self.settings.enhanced_models_available:
+        maximum = 600 if engine == "mvsep" else 180
+        if end_s - start_s > maximum:
             raise ValueError(
-                "Enhanced models are not installed. Run "
-                "`./scripts/install-enhanced-models.sh` or choose Fast preview."
+                f"Selected passage must be no longer than {maximum // 60} minutes"
+            )
+        if engine == "mvsep" and not cloud_consent:
+            raise ValueError("Confirm MVSep cloud processing before creating this draft")
+        if engine == "mvsep" and not self.settings.cloud_pipeline_available:
+            raise ValueError(
+                "MVSep cloud processing is not ready. Add an API token and install "
+                "the Basic Pitch worker."
             )
         base_revision = expected_revision
         with self._lock:
@@ -142,7 +152,9 @@ class Pipeline:
             if active:
                 raise RuntimeError("This project is already being processed")
             run = new_run()
+            cancellation = threading.Event()
             self._project_jobs[project_id] = run.id
+            self._project_cancellations[project_id] = cancellation
 
         try:
             queued = self.store.update(
@@ -158,6 +170,7 @@ class Pipeline:
         except RevisionConflictError as error:
             with self._lock:
                 self._project_jobs.pop(project_id, None)
+                self._project_cancellations.pop(project_id, None)
             raise RuntimeError("Notes changed while the draft was queued; try again") from error
         self.executor.submit(
             self._execute,
@@ -169,8 +182,29 @@ class Pipeline:
             tuning,
             fret_count,
             engine,
+            cancellation,
         )
         return queued
+
+    def cancel(self, project_id: str) -> Project:
+        with self._lock:
+            run_id = self._project_jobs.get(project_id)
+            cancellation = self._project_cancellations.get(project_id)
+            if run_id is None or cancellation is None:
+                raise RuntimeError("This project has no active draft")
+            cancellation.set()
+        self._set_run(
+            project_id,
+            run_id,
+            message="Cancelling draft",
+            stage_id="separate",
+            stage_state=StageState.running,
+            detail="Stopping MVSep job",
+        )
+        project = self.store.get(project_id)
+        if project is None:
+            raise KeyError(project_id)
+        return project
 
     def _set_run(
         self,
@@ -198,12 +232,24 @@ class Pipeline:
                             }
                         )
                     )
-                elif state == RunState.failed and stage.status == StageState.running:
+                elif state in {RunState.failed, RunState.cancelled} and stage.status in {
+                    StageState.running,
+                    StageState.pending,
+                }:
                     stages.append(
                         stage.model_copy(
                             update={
-                                "status": StageState.failed,
-                                "detail": error or "Stage failed",
+                                "status": (
+                                    StageState.failed
+                                    if state == RunState.failed
+                                    and stage.status == StageState.running
+                                    else StageState.skipped
+                                ),
+                                "detail": (
+                                    error or "Stage failed"
+                                    if state == RunState.failed
+                                    else "Cancelled"
+                                ),
                             }
                         )
                     )
@@ -232,6 +278,7 @@ class Pipeline:
         tuning: list[int],
         fret_count: int,
         engine: ProcessingEngine,
+        cancellation: threading.Event,
     ) -> None:
         directory = self.store.project_dir(project_id)
         original = directory / "original.wav"
@@ -253,19 +300,34 @@ class Pipeline:
                     stage_state=StageState.running,
                     message="Listening for the guitar",
                 )
-                if engine == "enhanced":
-                    sample_rate, duration = create_enhanced_stems(
+                if engine == "mvsep":
+                    assert self.settings.mvsep_api_token is not None
+
+                    def separation_progress(detail: str) -> None:
+                        self._set_run(
+                            project_id,
+                            run_id,
+                            stage_id="separate",
+                            stage_state=StageState.running,
+                            message=detail,
+                            detail=detail,
+                        )
+
+                    sample_rate, duration = create_mvsep_stems(
                         original,
                         temporary_lead,
                         temporary_backing,
                         start_s,
                         end_s,
                         temporary,
-                        self.settings.demucs_executable,
+                        api_token=self.settings.mvsep_api_token,
+                        base_url=self.settings.mvsep_api_base_url,
+                        poll_seconds=self.settings.mvsep_poll_seconds,
+                        timeout_seconds=self.settings.mvsep_timeout_seconds,
+                        progress=separation_progress,
+                        cancelled=cancellation.is_set,
                     )
-                    separation_detail = (
-                        "Demucs htdemucs_6s; every guitar in the marked passage"
-                    )
+                    separation_detail = "MVSep one-stage lead/rhythm model · lossless WAV"
                 else:
                     sample_rate, duration = create_preview_stems(
                         original,
@@ -292,7 +354,9 @@ class Pipeline:
                     stage_id="hear",
                     stage_state=StageState.running,
                 )
-                if engine == "enhanced":
+                if cancellation.is_set():
+                    raise MVSepCancelled("Draft cancelled")
+                if engine == "mvsep":
                     tab = transcribe_basic_pitch(
                         temporary_lead,
                         original,
@@ -336,6 +400,8 @@ class Pipeline:
                     stage_id="fingering",
                     stage_state=StageState.complete,
                 )
+                if cancellation.is_set():
+                    raise MVSepCancelled("Draft cancelled")
                 if self._closing:
                     raise PipelineInterrupted
 
@@ -351,7 +417,7 @@ class Pipeline:
             superseded: list[str] = []
 
             def finish(project: Project) -> Project:
-                enhanced = engine == "enhanced"
+                cloud = engine == "mvsep"
                 superseded.extend(
                     asset.filename
                     for asset in project.assets
@@ -371,8 +437,8 @@ class Pipeline:
                             duration_s=duration,
                             sample_rate=sample_rate,
                             method=(
-                                "Demucs htdemucs_6s guitar estimate"
-                                if enhanced
+                                "MVSep one-stage lead-guitar estimate"
+                                if cloud
                                 else "Local frequency-focused preview"
                             ),
                         ),
@@ -383,8 +449,8 @@ class Pipeline:
                             duration_s=duration,
                             sample_rate=sample_rate,
                             method=(
-                                "Original minus Demucs guitar estimate in marked passage"
-                                if enhanced
+                                "Original minus MVSep lead estimate"
+                                if cloud
                                 else "Original minus frequency-focused preview"
                             ),
                         ),
@@ -408,17 +474,20 @@ class Pipeline:
                         ),
                         "tab": tab.model_copy(update={"revision": project.tab.revision + 1}),
                         "run": complete_run,
-                        "separation_scope": "all-guitar" if enhanced else "preview",
+                        "separation_scope": "solo-guitar" if cloud else "preview",
                         "provenance": (
                             [
                                 "Audio decoded locally with FFmpeg.",
-                                "Demucs htdemucs_6s estimated every guitar in the "
-                                "marked passage; it does not distinguish lead from rhythm.",
+                                "Selected audio sent to MVSep's Germany region with "
+                                "explicit consent.",
+                                "MVSep one-stage Lead/Rhythm model estimated foreground "
+                                "lead guitar; lossless 16-bit WAV returned.",
+                                "Backing track created locally as original minus estimated lead.",
                                 "Notes estimated locally with Spotify Basic Pitch; "
                                 "beats estimated locally with librosa.",
                                 "String and fret positions optimized for playability.",
                             ]
-                            if enhanced
+                            if cloud
                             else [
                                 "Audio decoded locally with FFmpeg.",
                                 "Preview stem uses harmonic, center-focused filtering; "
@@ -455,6 +524,13 @@ class Pipeline:
                     "when you are ready."
                 ),
             )
+        except MVSepCancelled:
+            self._set_run(
+                project_id,
+                run_id,
+                state=RunState.cancelled,
+                message="Draft cancelled",
+            )
         except (AudioProcessingError, PipelineInterrupted, ValueError, OSError) as error:
             self._set_run(
                 project_id,
@@ -470,7 +546,7 @@ class Pipeline:
                 run_id,
                 state=RunState.failed,
                 message="Draft needs help",
-                error="Unexpected local processing error. Check the server log.",
+                error="Unexpected processing error. Check the server log.",
             )
         finally:
             if not completed:
@@ -479,3 +555,4 @@ class Pipeline:
             with self._lock:
                 if self._project_jobs.get(project_id) == run_id:
                     self._project_jobs.pop(project_id, None)
+                    self._project_cancellations.pop(project_id, None)

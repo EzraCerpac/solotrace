@@ -52,15 +52,12 @@ def test_startup_terminalizes_orphaned_processing_run(tmp_path) -> None:
     )
 
 
-def test_enhanced_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> None:
+def test_mvsep_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> None:
     store = ProjectStore(tmp_path / "data")
     project = ensure_demo(store)
     worker_dir = tmp_path / "workers"
-    demucs = worker_dir / "separate" / "bin" / "demucs-mlx"
     basic_pitch = worker_dir / "transcribe" / "bin" / "python"
-    demucs.parent.mkdir(parents=True)
     basic_pitch.parent.mkdir(parents=True)
-    demucs.touch()
     basic_pitch.touch()
     settings = Settings(
         root_dir=tmp_path,
@@ -68,9 +65,13 @@ def test_enhanced_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> N
         web_dist=tmp_path,
         worker_dir=worker_dir,
         max_upload_bytes=1_000_000,
+        mvsep_api_token="test-token",
+        mvsep_api_base_url="https://de.mvsep.com/api",
+        mvsep_poll_seconds=0,
+        mvsep_timeout_seconds=60,
     )
 
-    def fake_stems(original, lead, backing, *_args):
+    def fake_stems(original, lead, backing, *_args, **_kwargs):
         shutil.copyfile(original, lead)
         shutil.copyfile(original, backing)
         info = sf.info(original)
@@ -79,7 +80,7 @@ def test_enhanced_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> N
     def fake_transcription(*_args) -> TabDocument:
         return project.tab
 
-    monkeypatch.setattr("solotrace.pipeline.create_enhanced_stems", fake_stems)
+    monkeypatch.setattr("solotrace.pipeline.create_mvsep_stems", fake_stems)
     monkeypatch.setattr("solotrace.pipeline.transcribe_basic_pitch", fake_transcription)
     pipeline = Pipeline(store, settings)
     pipeline.start(
@@ -89,7 +90,8 @@ def test_enhanced_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> N
         tuning=project.tab.tuning,
         fret_count=project.tab.fret_count,
         expected_revision=project.tab.revision,
-        engine="enhanced",
+        engine="mvsep",
+        cloud_consent=True,
     )
 
     deadline = time.monotonic() + 2
@@ -102,6 +104,7 @@ def test_enhanced_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> N
 
     assert finished is not None
     assert finished.run.state == RunState.complete
-    assert finished.separation_scope == "all-guitar"
-    assert finished.asset("lead").method == "Demucs htdemucs_6s guitar estimate"
+    assert finished.separation_scope == "solo-guitar"
+    assert finished.asset("lead").method == "MVSep one-stage lead-guitar estimate"
+    assert any("MVSep" in item for item in finished.provenance)
     assert any("Basic Pitch" in item for item in finished.provenance)

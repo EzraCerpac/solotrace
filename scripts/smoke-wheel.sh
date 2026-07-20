@@ -12,8 +12,7 @@ uv build --wheel --out-dir "$scratch/dist"
 uv venv "$scratch/venv" --python 3.11
 uv pip install \
   --python "$scratch/venv/bin/python" \
-  "$scratch"/dist/solotrace-*.whl \
-  'httpx>=0.28.1,<0.29'
+  "$scratch"/dist/solotrace-*.whl
 
 SOLOTRACE_DATA_DIR="$scratch/data" "$scratch/venv/bin/python" -c '
 import re
