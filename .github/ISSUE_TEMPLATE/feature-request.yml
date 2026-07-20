@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest a focused private-beta improvement
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Musician problem
+      description: Describe the workflow problem, not only a proposed control.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: dropdown
+    id: privacy
+    attributes:
+      label: Processing boundary
+      options:
+        - Must remain offline
+        - Optional consented cloud processing is acceptable
+        - No preference
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Do not attach copyrighted audio or private project data.

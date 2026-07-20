@@ -6,9 +6,28 @@ import re
 import shutil
 from pathlib import Path
 
+NON_TEXT_SUFFIXES = {
+    ".a",
+    ".dylib",
+    ".dll",
+    ".o",
+    ".pyd",
+    ".so",
+}
+
 
 def safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-") or "package"
+
+
+def is_text_notice(path: Path) -> bool:
+    if path.suffix.lower() in NON_TEXT_SUFFIXES:
+        return False
+    try:
+        sample = path.read_bytes()[:4096]
+    except OSError:
+        return False
+    return b"\0" not in sample
 
 
 def main() -> None:
@@ -35,7 +54,7 @@ def main() -> None:
             ):
                 continue
             source = Path(distribution.locate_file(file))
-            if not source.is_file():
+            if not source.is_file() or not is_text_notice(source):
                 continue
             package_dir = destination / safe_name(f"{name}-{version}")
             package_dir.mkdir(exist_ok=True)

@@ -103,6 +103,7 @@ class Settings:
         root = Path(__file__).resolve().parents[2]
         packaged_web = Path(__file__).resolve().parent / "static"
         checkout_web = root / "web" / "dist"
+        source_checkout = (root / "pyproject.toml").is_file()
         data_override = os.environ.get("SOLOTRACE_DATA_DIR")
         data = Path(
             data_override or user_data_path("SoloTrace", "SoloTrace")
@@ -115,7 +116,7 @@ class Settings:
         return cls(
             root_dir=root,
             data_dir=data,
-            web_dist=packaged_web if PACKAGED else checkout_web,
+            web_dist=checkout_web if source_checkout and not PACKAGED else packaged_web,
             worker_dir=Path(
                 os.environ.get("SOLOTRACE_WORKER_DIR") or root / ".workers"
             ).expanduser(),

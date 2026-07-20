@@ -12,13 +12,13 @@ fi
 cd "$root"
 pnpm --dir web build
 ./scripts/build-ffmpeg-macos.sh
-UV_CACHE_DIR="$root/.uv-cache" uv sync --group desktop
-UV_CACHE_DIR="$root/.uv-cache" uv run python \
+UV_CACHE_DIR="$root/.uv-cache" uv sync --locked --no-dev --group desktop
+UV_CACHE_DIR="$root/.uv-cache" uv run --frozen --no-dev python \
   scripts/collect-python-licenses.py build/macos/licenses
-UV_CACHE_DIR="$root/.uv-cache" uv run python \
+UV_CACHE_DIR="$root/.uv-cache" uv run --frozen --no-dev python \
   scripts/write-build-metadata.py \
   pyproject.toml build/macos/solotrace-build.json "$build_id"
-UV_CACHE_DIR="$root/.uv-cache" uv run pyinstaller \
+UV_CACHE_DIR="$root/.uv-cache" uv run --frozen --no-dev pyinstaller \
   --clean --noconfirm packaging/solotrace.spec
 
 ./scripts/sign-macos-app.sh \
@@ -27,7 +27,7 @@ UV_CACHE_DIR="$root/.uv-cache" uv run pyinstaller \
   packaging/entitlements.plist
 codesign --verify --deep --strict --verbose=2 dist/SoloTrace.app
 test "$(plutil -extract CFBundleShortVersionString raw dist/SoloTrace.app/Contents/Info.plist)" = \
-  "$(UV_CACHE_DIR="$root/.uv-cache" uv run python -c \
+  "$(UV_CACHE_DIR="$root/.uv-cache" uv run --frozen --no-dev python -c \
     'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
 file dist/SoloTrace.app/Contents/MacOS/SoloTrace | grep -q arm64
 echo "Built $root/dist/SoloTrace.app"

@@ -14,6 +14,15 @@ BUILD_METADATA = ROOT / "build" / "macos" / "solotrace-build.json"
 BUILD_ID = str(json.loads(BUILD_METADATA.read_text())["buildId"])
 SIGNING_IDENTITY = os.environ.get("SOLOTRACE_CODESIGN_IDENTITY", "-")
 
+
+def is_test_artifact(value: str) -> bool:
+    parts = value.replace("\\", "/").replace(".", "/").split("/")
+    return any(
+        part in {"test", "tests", "testing"} or part.startswith("test_")
+        for part in parts
+    )
+
+
 datas = [
     (str(ROOT / "web" / "dist"), "solotrace/static"),
     (str(ROOT / "vendor" / "ffmpeg" / "bin"), "ffmpeg/bin"),
@@ -29,9 +38,11 @@ binaries = []
 hiddenimports = ["solotrace.api", "solotrace.basic_pitch_worker", "solotrace.self_test"]
 for package in ("basic_pitch", "coremltools", "keyring", "webview"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
-    datas.extend(package_datas)
-    binaries.extend(package_binaries)
-    hiddenimports.extend(package_hiddenimports)
+    datas.extend(item for item in package_datas if not is_test_artifact(item[1]))
+    binaries.extend(item for item in package_binaries if not is_test_artifact(item[1]))
+    hiddenimports.extend(
+        item for item in package_hiddenimports if not is_test_artifact(item)
+    )
 datas.extend(copy_metadata("solotrace"))
 
 analysis = Analysis(

@@ -1,11 +1,15 @@
 # SoloTrace private beta terms
 
-Copyright © 2026 Ezra Cerpac. All rights reserved.
+Copyright © 2026 Ezra Cerpac.
 
-SoloTrace is confidential, prerelease software provided to invited testers for
-evaluation. It may contain defects and is supplied without warranty. Do not
-redistribute the app, reverse engineer proprietary SoloTrace code, or use it to
-process audio without the necessary rights.
+SoloTrace source code is available under the Apache License 2.0. The “private
+beta” label describes access to signed prerelease app builds and the level of
+support, not a restriction on rights granted by that license.
+
+Beta builds may contain defects and are supplied without additional warranty or
+support commitments. Testers must have the necessary rights to process and, when
+explicitly consented, upload audio. Do not share another person’s audio, project
+data, diagnostics, credentials, or other private data.
 
 Third-party components remain governed by their own licenses. These terms do
 not restrict rights granted by those licenses.

@@ -1,5 +1,7 @@
 # SoloTrace
 
+[![CI](https://github.com/EzraCerpac/solotrace/actions/workflows/ci.yml/badge.svg)](https://github.com/EzraCerpac/solotrace/actions/workflows/ci.yml)
+
 SoloTrace turns a recorded guitar solo into a synchronized, editable tab and a
 practice backing track. It opens with a generated demo, and projects remain in a
 private local library.
@@ -9,6 +11,12 @@ consented MVSep cloud path; transcription and editing stay local.
 The honest product promise is **accurate notes with playable, editable
 fingerings**. Audio rarely reveals which of several equivalent string and fret
 positions a guitarist used.
+
+![SoloTrace editor, practice mode, local import, tab versions, and optional MVSep setup](docs/screenshots/solotrace-collage.jpg)
+
+SoloTrace is open source under the
+[Apache License 2.0](LICENSE). Signed app builds remain a limited private beta;
+see [`PRIVATE_BETA_TERMS.md`](PRIVATE_BETA_TERMS.md).
 
 ## What works
 
@@ -110,6 +118,23 @@ Tests focus on the parts that protect real work: fingering legality, revision
 conflicts, parseable exports, exact demo stems, media range requests, and the
 production build.
 
+CI runs Python lint/tests, TypeScript checks, web tests, the production web
+build, and an installed-wheel smoke test on every pull request and `main` push.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Private beta releases
+
+Signed builds appear in [GitHub Releases](https://github.com/EzraCerpac/solotrace/releases)
+after Apple Developer enrollment and notarization credentials are configured.
+Release automation builds on GitHub's Apple-Silicon macOS runner, signs nested
+binaries, notarizes and staples the DMG, verifies Gatekeeper, publishes a
+prerelease, and attaches its SHA-256 checksum.
+
+- Tester instructions: [`docs/beta/BETA_GUIDE.md`](docs/beta/BETA_GUIDE.md)
+- Privacy notice: [`docs/beta/PRIVACY.md`](docs/beta/PRIVACY.md)
+- MVSep disclosure: [`docs/beta/MVSEP_DISCLOSURE.md`](docs/beta/MVSEP_DISCLOSURE.md)
+- Maintainer release guide: [`docs/releasing.md`](docs/releasing.md)
+
 ## Processing model
 
 The full lead path is:
@@ -175,3 +200,12 @@ risks without improving the transcription core. A future desktop-only importer
 can be evaluated separately.
 
 The bundled demo is synthesized locally and contains no third-party recording.
+
+Security reports belong in a private GitHub security advisory, not an issue.
+See [`SECURITY.md`](SECURITY.md).
+
+## License
+
+Copyright 2026 Ezra Cerpac. Licensed under the
+[Apache License 2.0](LICENSE). Third-party components retain their own licenses;
+see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

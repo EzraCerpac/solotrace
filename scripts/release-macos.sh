@@ -4,6 +4,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 identity=${SOLOTRACE_CODESIGN_IDENTITY:-}
 notary_profile=${SOLOTRACE_NOTARY_PROFILE:-}
+notary_keychain=${SOLOTRACE_NOTARY_KEYCHAIN:-}
 
 if [ -z "$identity" ] || [ -z "$notary_profile" ]; then
   echo "Set SOLOTRACE_CODESIGN_IDENTITY and SOLOTRACE_NOTARY_PROFILE." >&2
@@ -30,7 +31,6 @@ SOLOTRACE_CODESIGN_IDENTITY="$identity" \
 ./scripts/sign-macos-app.sh \
   dist/SoloTrace.app "$identity" packaging/entitlements.plist
 codesign --verify --deep --strict --verbose=2 dist/SoloTrace.app
-spctl --assess --type execute --verbose=2 dist/SoloTrace.app
 
 rm -rf "$staging"
 mkdir -p "$staging" "$release_dir"
@@ -42,7 +42,14 @@ hdiutil create \
   -srcfolder "$staging" \
   -ov -format UDZO "$dmg"
 
-xcrun notarytool submit "$dmg" --keychain-profile "$notary_profile" --wait
+if [ -n "$notary_keychain" ]; then
+  xcrun notarytool submit "$dmg" \
+    --keychain-profile "$notary_profile" \
+    --keychain "$notary_keychain" \
+    --wait
+else
+  xcrun notarytool submit "$dmg" --keychain-profile "$notary_profile" --wait
+fi
 xcrun stapler staple "$dmg"
 xcrun stapler validate "$dmg"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
