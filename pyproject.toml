@@ -47,6 +47,12 @@ packages = ["server/solotrace"]
 [tool.hatch.build.targets.wheel.force-include]
 "web/dist" = "solotrace/static"
 
+[tool.uv]
+# SoloTrace ships Basic Pitch's CoreML model on macOS/Python 3.11. Its
+# TensorFlow backends are unused and otherwise pollute the universal lock with
+# vulnerable, non-shipped Keras and protobuf versions.
+exclude-dependencies = ["tensorflow", "tensorflow-macos"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
