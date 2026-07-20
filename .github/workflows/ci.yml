@@ -42,10 +42,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Install locked dependencies
-        run: |
-          uv sync --locked --group dev
-          pnpm --dir web install --frozen-lockfile
+      - name: Install locked web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Build packaged web assets
+        run: pnpm --dir web build
+
+      - name: Install locked Python dependencies
+        run: uv sync --locked --group dev
 
       - name: Lint Python
         run: uv run --frozen ruff check server tests
@@ -57,9 +61,6 @@ jobs:
         run: |
           pnpm --dir web check
           pnpm --dir web test
-
-      - name: Build web app
-        run: pnpm --dir web build
 
       - name: Smoke installed wheel
         run: ./scripts/smoke-wheel.sh

@@ -1,8 +1,9 @@
 [tasks.install]
-description = "Install Python and web dependencies"
+description = "Install dependencies and build packaged web assets"
 run = [
-  "UV_CACHE_DIR=.uv-cache uv sync",
   "pnpm --dir web install",
+  "pnpm --dir web build",
+  "UV_CACHE_DIR=.uv-cache uv sync",
 ]
 
 [tasks.install-models]
