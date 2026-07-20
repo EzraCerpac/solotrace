@@ -4,6 +4,7 @@ import { api, ApiError } from './api'
 import { Icon } from './components/Icon'
 import { NoteInspector } from './components/NoteInspector'
 import { PipelineStrip } from './components/PipelineStrip'
+import { PlayTab } from './components/PlayTab'
 import { TabEditor } from './components/TabEditor'
 import { Transport } from './components/Transport'
 import { UploadDialog } from './components/UploadDialog'
@@ -47,6 +48,8 @@ function App() {
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [viewMode, setViewMode] = useState<'edit' | 'play'>('edit')
+  const [fullscreen, setFullscreen] = useState(false)
 
   const loadInitial = useCallback(async () => {
     setLoading(true)
@@ -79,6 +82,13 @@ function App() {
     update()
     query.addEventListener('change', update)
     return () => query.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    const update = () => setFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', update)
+    update()
+    return () => document.removeEventListener('fullscreenchange', update)
   }, [])
 
   useEffect(() => {
@@ -182,23 +192,6 @@ function App() {
     else audio.pause()
   }, [])
 
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.code !== 'Space') return
-      const target = event.target as HTMLElement | null
-      if (
-        target?.matches('input, textarea, select, button') ||
-        target?.isContentEditable
-      ) {
-        return
-      }
-      event.preventDefault()
-      togglePlay()
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [togglePlay])
-
   const seek = useCallback((seconds: number) => {
     const audio = audioRef.current
     if (!audio) return
@@ -206,6 +199,33 @@ function App() {
     audio.currentTime = next
     setCurrentTime(next)
   }, [])
+
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      const target = event.target
+      if (
+        (target instanceof Element &&
+          target.matches(
+            'input, textarea, select, button, summary, a, [role="button"]',
+          )) ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+      if (event.code === 'Space') {
+        event.preventDefault()
+        togglePlay()
+      } else if (viewMode === 'play' && event.key === 'ArrowLeft') {
+        event.preventDefault()
+        seek(currentTime - 5)
+      } else if (viewMode === 'play' && event.key === 'ArrowRight') {
+        event.preventDefault()
+        seek(currentTime + 5)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [currentTime, seek, togglePlay, viewMode])
 
   const bindAudio = useCallback((node: HTMLAudioElement | null) => {
     audioRef.current = node
@@ -238,7 +258,7 @@ function App() {
   }
 
   const saveNotes = async (notes: NoteEvent[], message: string) => {
-    if (!project || savingRef.current) return
+    if (viewMode !== 'edit' || !project || savingRef.current) return
     const previous = project
     savingRef.current = true
     setSaving(true)
@@ -269,7 +289,7 @@ function App() {
   }
 
   const changeFingering = (noteId: string, fingering: Fingering) => {
-    if (!project || savingRef.current) return
+    if (viewMode !== 'edit' || !project || savingRef.current) return
     const notes = project.tab.notes.map((note) =>
       note.id === noteId
         ? {
@@ -285,13 +305,13 @@ function App() {
   }
 
   const saveSelectedNote = (nextNote: NoteEvent) => {
-    if (!project || savingRef.current) return
+    if (viewMode !== 'edit' || !project || savingRef.current) return
     const notes = project.tab.notes.map((note) => (note.id === nextNote.id ? nextNote : note))
     void saveNotes(notes, 'Note saved')
   }
 
   const createDraft = async () => {
-    if (!project || !passage) return
+    if (viewMode !== 'edit' || !project || !passage) return
     setError('')
     try {
       const next = await api.processProject(
@@ -309,7 +329,7 @@ function App() {
   }
 
   const refinger = async (mode: FingeringMode) => {
-    if (!project || savingRef.current) return
+    if (viewMode !== 'edit' || !project || savingRef.current) return
     savingRef.current = true
     setSaving(true)
     try {
@@ -351,6 +371,37 @@ function App() {
     setTrack(role)
   }
 
+  const changeSpeed = (nextSpeed: number) => {
+    setSpeed(nextSpeed)
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextSpeed
+      audioRef.current.preservesPitch = true
+    }
+  }
+
+  const enterPlayMode = () => {
+    if (!project?.tab.notes.length || saving) return
+    setSelectedNoteId(null)
+    setRailOpen(false)
+    setViewMode('play')
+  }
+
+  const exitPlayMode = () => {
+    setViewMode('edit')
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined)
+    }
+  }
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    } catch {
+      setNotice('Fullscreen unavailable. Play mode still fills the window.')
+    }
+  }
+
   if (loading) {
     return (
       <main className="startup">
@@ -378,9 +429,68 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${selectedNote ? 'has-inspector' : ''}`}>
+    <div
+      className={
+        viewMode === 'play'
+          ? 'play-shell'
+          : `app-shell ${selectedNote ? 'has-inspector' : ''}`
+      }
+    >
       <audio ref={bindAudio} preload="metadata" />
-      <header className="app-header">
+      {viewMode === 'play' ? (
+        <>
+          <header className="play-header">
+            <div className="mode-switch" aria-label="Workspace mode">
+              <button type="button" onClick={exitPlayMode}>
+                Edit
+              </button>
+              <button type="button" className="active" aria-pressed="true">
+                <Icon name="play" />
+                Play
+              </button>
+            </div>
+            <div className="play-song-heading">
+              <h1>{project.title}</h1>
+              <span>{projectSubtitle(project)}</span>
+            </div>
+            <span className="shortcut-hint">Space play · ← → jump 5 seconds</span>
+            <button
+              className="button secondary fullscreen-button"
+              type="button"
+              aria-pressed={fullscreen}
+              onClick={() => void toggleFullscreen()}
+            >
+              <Icon name="fullscreen" />
+              {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            </button>
+          </header>
+          <PlayTab
+            project={project}
+            currentTime={currentTime}
+            playing={playing}
+            onSeek={seek}
+          />
+          <Transport
+            variant="play"
+            playing={playing}
+            currentTime={currentTime}
+            duration={project.duration_s}
+            speed={speed}
+            loop={loop}
+            loopStart={passage.start_s}
+            loopEnd={passage.end_s}
+            track={track}
+            availableTracks={assets.map((asset) => asset.role)}
+            onTrack={switchTrack}
+            onTogglePlay={togglePlay}
+            onSeek={seek}
+            onSpeed={changeSpeed}
+            onLoop={setLoop}
+          />
+        </>
+      ) : (
+        <>
+          <header className="app-header">
         <button
           ref={menuButtonRef}
           type="button"
@@ -403,6 +513,20 @@ function App() {
         <div className="song-heading">
           <h1>{project.title}</h1>
           <span>{projectSubtitle(project)}</span>
+        </div>
+        <div className="mode-switch edit-mode-switch" aria-label="Workspace mode">
+          <button type="button" className="active" aria-pressed="true">
+            Edit
+          </button>
+          <button
+            type="button"
+            disabled={saving || !project.tab.notes.length}
+            aria-pressed="false"
+            onClick={enterPlayMode}
+          >
+            <Icon name="play" />
+            Play
+          </button>
         </div>
         <div className="save-state">
           <span className={saving ? 'saving' : ''} />
@@ -651,13 +775,7 @@ function App() {
         loopEnd={passage.end_s}
         onTogglePlay={togglePlay}
         onSeek={seek}
-        onSpeed={(nextSpeed) => {
-          setSpeed(nextSpeed)
-          if (audioRef.current) {
-            audioRef.current.playbackRate = nextSpeed
-            audioRef.current.preservesPitch = true
-          }
-        }}
+        onSpeed={changeSpeed}
         onLoop={setLoop}
       />
 
@@ -673,6 +791,8 @@ function App() {
           return next
         }}
       />
+        </>
+      )}
 
       {(notice || error) && (
         <div className={`toast ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}>

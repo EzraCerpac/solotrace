@@ -7,6 +7,7 @@ type IconName =
   | 'close'
   | 'download'
   | 'folder'
+  | 'fullscreen'
   | 'loop'
   | 'menu'
   | 'next'
@@ -36,6 +37,14 @@ const paths: Record<IconName, React.ReactNode> = {
   ),
   folder: (
     <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5Z" />
+  ),
+  fullscreen: (
+    <>
+      <path d="M8 3H3v5" />
+      <path d="M16 3h5v5" />
+      <path d="M8 21H3v-5" />
+      <path d="M16 21h5v-5" />
+    </>
   ),
   loop: (
     <>
@@ -115,4 +124,3 @@ export function Icon({
     </svg>
   )
 }
-
