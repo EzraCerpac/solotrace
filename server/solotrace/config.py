@@ -103,18 +103,19 @@ class Settings:
         root = Path(__file__).resolve().parents[2]
         packaged_web = Path(__file__).resolve().parent / "static"
         checkout_web = root / "web" / "dist"
+        data_override = os.environ.get("SOLOTRACE_DATA_DIR")
         data = Path(
-            os.environ.get("SOLOTRACE_DATA_DIR")
-            or user_data_path("SoloTrace", "SoloTrace")
+            data_override or user_data_path("SoloTrace", "SoloTrace")
+        ).expanduser()
+        log_override = os.environ.get("SOLOTRACE_LOG_DIR")
+        log_dir = Path(
+            log_override
+            or (data / "logs" if data_override else user_log_path("SoloTrace", "SoloTrace"))
         ).expanduser()
         return cls(
             root_dir=root,
             data_dir=data,
-            web_dist=(
-                packaged_web
-                if (packaged_web / "index.html").is_file()
-                else checkout_web
-            ),
+            web_dist=packaged_web if PACKAGED else checkout_web,
             worker_dir=Path(
                 os.environ.get("SOLOTRACE_WORKER_DIR") or root / ".workers"
             ).expanduser(),
@@ -130,10 +131,7 @@ class Settings:
             mvsep_timeout_seconds=float(
                 os.environ.get("SOLOTRACE_MVSEP_TIMEOUT_SECONDS", "1800")
             ),
-            log_dir=Path(
-                os.environ.get("SOLOTRACE_LOG_DIR")
-                or user_log_path("SoloTrace", "SoloTrace")
-            ).expanduser(),
+            log_dir=log_dir,
             packaged=PACKAGED,
             build_id=BUILD_ID,
         )

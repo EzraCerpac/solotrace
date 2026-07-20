@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
-ROOT = Path(SPECPATH).parent.parent
+ROOT = Path.cwd()
 PROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text())
 APP_VERSION = PROJECT["project"]["version"]
 BUILD_METADATA = ROOT / "build" / "macos" / "solotrace-build.json"

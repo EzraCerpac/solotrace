@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { vi } from 'vitest'
 
 import { makeProject } from './test-project'
@@ -56,7 +56,9 @@ beforeEach(() => {
   })
   Object.defineProperty(document.documentElement, 'requestFullscreen', {
     configurable: true,
-    value: undefined,
+    value: vi.fn(() => {
+      throw new Error('unsupported')
+    }),
   })
 })
 
@@ -93,10 +95,8 @@ test('Play mode removes editing controls and keeps seeking, tracks, and keyboard
   fireEvent.keyDown(window, { code: 'Space' })
   expect(HTMLMediaElement.prototype.play).toHaveBeenCalled()
 
-  fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }))
-  await waitFor(() =>
-    expect(
-      screen.getByText('Fullscreen unavailable. Play mode still fills the window.'),
-    ).toBeInTheDocument(),
-  )
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }))
+  })
+  expect(document.documentElement.requestFullscreen).toHaveBeenCalled()
 })

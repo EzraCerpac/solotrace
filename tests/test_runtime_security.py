@@ -10,10 +10,25 @@ from solotrace.api import app
 from solotrace.config import (
     KEYCHAIN_ACCOUNT,
     KEYCHAIN_SERVICE,
+    Settings,
     delete_mvsep_token,
     store_mvsep_token,
 )
 from solotrace.demo import DEMO_ID
+
+
+def test_development_runtime_uses_checkout_ui_and_isolated_logs(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(data_dir))
+    monkeypatch.delenv("SOLOTRACE_LOG_DIR", raising=False)
+
+    settings = Settings.load()
+
+    assert settings.web_dist == settings.root_dir / "web" / "dist"
+    assert settings.log_dir == data_dir / "logs"
 
 
 def test_packaged_launch_secret_becomes_one_time_http_only_session(

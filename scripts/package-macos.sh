@@ -21,6 +21,10 @@ UV_CACHE_DIR="$root/.uv-cache" uv run python \
 UV_CACHE_DIR="$root/.uv-cache" uv run pyinstaller \
   --clean --noconfirm packaging/solotrace.spec
 
+./scripts/sign-macos-app.sh \
+  dist/SoloTrace.app \
+  "${SOLOTRACE_CODESIGN_IDENTITY:--}" \
+  packaging/entitlements.plist
 codesign --verify --deep --strict --verbose=2 dist/SoloTrace.app
 test "$(plutil -extract CFBundleShortVersionString raw dist/SoloTrace.app/Contents/Info.plist)" = \
   "$(UV_CACHE_DIR="$root/.uv-cache" uv run python -c \

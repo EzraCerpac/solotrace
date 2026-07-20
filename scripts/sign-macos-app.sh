@@ -5,17 +5,20 @@ app=${1:?usage: sign-macos-app.sh APP IDENTITY ENTITLEMENTS}
 identity=${2:?usage: sign-macos-app.sh APP IDENTITY ENTITLEMENTS}
 entitlements=${3:?usage: sign-macos-app.sh APP IDENTITY ENTITLEMENTS}
 
+sign() {
+  if [ "$identity" = "-" ]; then
+    codesign --force --options runtime --sign "$identity" "$@"
+  else
+    codesign --force --options runtime --timestamp --sign "$identity" "$@"
+  fi
+}
+
 find "$app/Contents/Frameworks" -type f -print |
 while IFS= read -r candidate; do
   if file "$candidate" | grep -q "Mach-O"; then
-    codesign --force --options runtime --timestamp \
-      --sign "$identity" "$candidate"
+    sign "$candidate"
   fi
 done
 
-codesign --force --options runtime --timestamp \
-  --entitlements "$entitlements" \
-  --sign "$identity" "$app/Contents/MacOS/SoloTrace"
-codesign --force --options runtime --timestamp \
-  --entitlements "$entitlements" \
-  --sign "$identity" "$app"
+sign --entitlements "$entitlements" "$app/Contents/MacOS/SoloTrace"
+sign --entitlements "$entitlements" "$app"
