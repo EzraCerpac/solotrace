@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from types import TracebackType
 from typing import IO, Any
@@ -102,10 +103,8 @@ class LocalServer:
     def stop(self, *_args: object) -> None:
         self.server.should_exit = True
         self.thread.join(timeout=15)
-        try:
+        with suppress(OSError):
             self.socket.close()
-        except OSError:
-            pass
 
 
 class DesktopBridge:
@@ -146,7 +145,7 @@ class DesktopBridge:
         )
         if not selected:
             return {"ok": False, "cancelled": True}
-        destination = Path(selected[0] if isinstance(selected, (list, tuple)) else selected)
+        destination = Path(selected[0] if isinstance(selected, list | tuple) else selected)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             prefix=f".{destination.name}-",
@@ -233,6 +232,11 @@ def _configure_bundled_tools() -> None:
 def run() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--basic-pitch-worker":
         _worker()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+        from .self_test import run as self_test
+
+        self_test()
         return
 
     import webview

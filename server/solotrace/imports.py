@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import ValidationError
 
+from .audio import AudioProcessingError, probe_audio
 from .exports import PROJECT_FORMAT, PROJECT_SCHEMA_VERSION
 from .models import ProcessingRun, Project, RunState, now_iso
 from .storage import ProjectStore
@@ -91,12 +92,19 @@ def import_project_bundle(
             raise ProjectImportError("Project bundle contains invalid project data") from error
 
         project_id = project.id
+        if not project_id or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+            for character in project_id
+        ):
+            raise ProjectImportError("Project bundle contains an unsafe project identifier")
         if store.get(project_id) is not None:
             project_id = f"{project_id[:36].rstrip('-')}-{uuid.uuid4().hex[:12]}"
         declared: dict[str, zipfile.ZipInfo] = {}
         for asset in project.assets:
             if Path(asset.filename).name != asset.filename:
                 raise ProjectImportError("Project bundle declares an unsafe media filename")
+            if asset.filename in declared:
+                raise ProjectImportError("Project bundle declares duplicate media")
             member_name = f"{root}/audio/{asset.filename}"
             try:
                 declared[asset.filename] = archive.getinfo(member_name)
@@ -114,6 +122,7 @@ def import_project_bundle(
             update={
                 "id": project_id,
                 "demo": False,
+                "trashed_at": None,
                 "run": run,
                 "updated_at": now_iso(),
                 "assets": [
@@ -139,6 +148,24 @@ def import_project_bundle(
                         shutil.copyfileobj(source, output, length=1024 * 1024)
                 except (OSError, zipfile.BadZipFile) as error:
                     raise ProjectImportError("Project bundle contains damaged audio") from error
+                asset = next(
+                    candidate
+                    for candidate in imported.assets
+                    if candidate.filename == filename
+                )
+                try:
+                    duration, sample_rate = probe_audio(destination)
+                except AudioProcessingError as error:
+                    raise ProjectImportError(
+                        f"Project bundle contains unreadable {asset.role} audio"
+                    ) from error
+                if (
+                    abs(duration - asset.duration_s) > max(0.25, asset.duration_s * 0.02)
+                    or sample_rate != asset.sample_rate
+                ):
+                    raise ProjectImportError(
+                        f"Project bundle {asset.role} audio does not match its declaration"
+                    )
             final = store.projects_dir / project_id
             if final.exists():
                 raise ProjectImportError("A project with this identifier already exists")

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProcessingEngine = Literal["preview", "mvsep"]
+FingeringMode = Literal["balanced", "easiest", "position"]
 
 
 def now_iso() -> str:
@@ -51,6 +52,7 @@ class NoteEvent(StrictModel):
     confidence: Confidence
     alternatives: list[Fingering] = Field(default_factory=list, max_length=8)
     user_locked: bool = False
+    reviewed: bool = False
 
     @model_validator(mode="after")
     def validate_ranges(self) -> NoteEvent:
@@ -67,7 +69,6 @@ class SyncAnchor(StrictModel):
 
 
 class TabDocument(StrictModel):
-    revision: int = Field(default=1, ge=1)
     sample_rate: int = Field(gt=0)
     ticks_per_quarter: int = Field(default=480, gt=0)
     tempo_bpm: float = Field(default=120, gt=20, le=400)
@@ -150,25 +151,146 @@ class Passage(StrictModel):
         return self
 
 
+class TabVersion(StrictModel):
+    id: str = Field(min_length=1, max_length=96)
+    name: str = Field(min_length=1, max_length=80)
+    source: str = Field(default="draft", max_length=120)
+    fingering_mode: FingeringMode = "balanced"
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    tab: TabDocument
+
+
 class Project(StrictModel):
     id: str
     title: str
     artist: str = ""
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
+    revision: int = Field(default=1, ge=1)
     duration_s: float = Field(gt=0)
     passage: Passage
     assets: list[MediaAsset]
-    tab: TabDocument
+    versions: list[TabVersion] = Field(min_length=1, max_length=100)
+    active_version_id: str
     run: ProcessingRun
     source_name: str
     demo: bool = False
+    trashed_at: str | None = None
     separation_scope: Literal["solo-guitar", "all-guitar", "preview", "exact"] = "preview"
     waveform_peaks: list[float] = Field(default_factory=list, max_length=5000)
     provenance: list[str] = Field(default_factory=list, max_length=64)
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_single_tab(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "versions" in value:
+            return value
+        legacy = dict(value)
+        raw_tab = legacy.pop("tab", None)
+        if raw_tab is None:
+            return value
+        tab = dict(raw_tab)
+        revision = int(tab.pop("revision", legacy.get("revision", 1)))
+        created_at = str(legacy.get("created_at") or now_iso())
+        updated_at = str(legacy.get("updated_at") or created_at)
+        demo = bool(legacy.get("demo"))
+        version_id = "version-demo" if demo else "version-original"
+        legacy["revision"] = revision
+        legacy["active_version_id"] = version_id
+        legacy["versions"] = [
+            {
+                "id": version_id,
+                "name": "Demo tab" if demo else "Original draft",
+                "source": "demo" if demo else "legacy",
+                "fingering_mode": "balanced",
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "tab": tab,
+            }
+        ]
+        return legacy
+
+    @model_validator(mode="after")
+    def validate_versions(self) -> Project:
+        version_ids = [version.id for version in self.versions]
+        if len(version_ids) != len(set(version_ids)):
+            raise ValueError("tab version ids must be unique")
+        if self.active_version_id not in version_ids:
+            raise ValueError("active tab version does not exist")
+        return self
+
+    @property
+    def active_version(self) -> TabVersion:
+        return next(
+            version for version in self.versions if version.id == self.active_version_id
+        )
+
+    @property
+    def tab(self) -> TabDocument:
+        return self.active_version.tab
+
+    def replace_active_tab(self, tab: TabDocument) -> Project:
+        updated_at = now_iso()
+        versions = [
+            version.model_copy(update={"tab": tab, "updated_at": updated_at})
+            if version.id == self.active_version_id
+            else version
+            for version in self.versions
+        ]
+        return self.model_copy(update={"versions": versions})
+
     def asset(self, role: str) -> MediaAsset | None:
         return next((asset for asset in self.assets if asset.role == role), None)
+
+
+class TabVersionSummary(StrictModel):
+    id: str
+    name: str
+    source: str
+    fingering_mode: FingeringMode
+    created_at: str
+    updated_at: str
+    note_count: int = Field(ge=0)
+    needs_review_count: int = Field(ge=0)
+
+
+class ProjectSummary(StrictModel):
+    id: str
+    title: str
+    artist: str
+    updated_at: str
+    revision: int
+    duration_s: float
+    source_name: str
+    demo: bool
+    trashed_at: str | None
+    active_version_id: str
+    active_version_name: str
+    note_count: int = Field(ge=0)
+    needs_review_count: int = Field(ge=0)
+
+
+class ProjectView(StrictModel):
+    id: str
+    title: str
+    artist: str
+    created_at: str
+    updated_at: str
+    revision: int
+    duration_s: float
+    passage: Passage
+    assets: list[MediaAsset]
+    tab: TabDocument
+    versions: list[TabVersionSummary]
+    active_version_id: str
+    run: ProcessingRun
+    source_name: str
+    demo: bool
+    trashed_at: str | None
+    separation_scope: Literal["solo-guitar", "all-guitar", "preview", "exact"]
+    waveform_peaks: list[float]
+    provenance: list[str]
 
 
 class ProcessRequest(StrictModel):
@@ -201,8 +323,31 @@ class ProcessRequest(StrictModel):
 
 
 class RefingerRequest(StrictModel):
-    mode: Literal["balanced", "easiest", "position"] = "balanced"
+    mode: FingeringMode = "balanced"
     expected_revision: int = Field(ge=1)
+
+
+class ProjectMutationRequest(StrictModel):
+    expected_revision: int = Field(ge=1)
+
+
+class ProjectRenameRequest(ProjectMutationRequest):
+    title: str = Field(min_length=1, max_length=120)
+    artist: str = Field(default="", max_length=120)
+
+
+class WorkspacePatch(ProjectMutationRequest):
+    passage: Passage
+
+
+class VersionCreateRequest(ProjectMutationRequest):
+    source_version_id: str = Field(min_length=1, max_length=96)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    mode: FingeringMode | None = None
+
+
+class VersionRenameRequest(ProjectMutationRequest):
+    name: str = Field(min_length=1, max_length=80)
 
 
 class MVSepTokenRequest(StrictModel):

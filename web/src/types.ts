@@ -2,6 +2,27 @@ export type AssetRole = 'original' | 'lead' | 'backing'
 export type RunState = 'idle' | 'queued' | 'running' | 'complete' | 'failed' | 'cancelled'
 export type StageState = 'pending' | 'running' | 'complete' | 'failed' | 'skipped'
 export type FingeringMode = 'balanced' | 'easiest' | 'position'
+
+interface NativeBridgeResult {
+  ok: boolean
+  cancelled?: boolean
+  error?: string
+}
+
+declare global {
+  interface Window {
+    pywebview?: {
+      api?: {
+        saveExport: (
+          projectId: string,
+          formatName: string,
+        ) => Promise<NativeBridgeResult>
+        saveDiagnostics: () => Promise<NativeBridgeResult>
+        revealDataFolder: () => Promise<NativeBridgeResult>
+      }
+    }
+  }
+}
 export type DraftEngine = 'mvsep' | 'preview'
 export type DraftScope = 'whole' | 'passage'
 
@@ -35,6 +56,7 @@ export interface NoteEvent {
   confidence: Confidence
   alternatives: Fingering[]
   user_locked: boolean
+  reviewed: boolean
 }
 
 export interface SyncAnchor {
@@ -43,7 +65,6 @@ export interface SyncAnchor {
 }
 
 export interface TabDocument {
-  revision: number
   sample_rate: number
   ticks_per_quarter: number
   tempo_bpm: number
@@ -52,6 +73,33 @@ export interface TabDocument {
   fret_count: number
   sync_anchors: SyncAnchor[]
   notes: NoteEvent[]
+}
+
+export interface TabVersionSummary {
+  id: string
+  name: string
+  source: string
+  fingering_mode: FingeringMode
+  created_at: string
+  updated_at: string
+  note_count: number
+  needs_review_count: number
+}
+
+export interface ProjectSummary {
+  id: string
+  title: string
+  artist: string
+  updated_at: string
+  revision: number
+  duration_s: number
+  source_name: string
+  demo: boolean
+  trashed_at: string | null
+  active_version_id: string
+  active_version_name: string
+  note_count: number
+  needs_review_count: number
 }
 
 export interface PipelineStage {
@@ -92,19 +140,26 @@ export interface Project {
   artist: string
   created_at: string
   updated_at: string
+  revision: number
   duration_s: number
   passage: Passage
   assets: MediaAsset[]
   tab: TabDocument
+  versions: TabVersionSummary[]
+  active_version_id: string
   run: ProcessingRun
   source_name: string
   demo: boolean
+  trashed_at: string | null
   separation_scope: 'solo-guitar' | 'all-guitar' | 'preview' | 'exact'
   waveform_peaks: number[]
   provenance: string[]
 }
 
 export interface Capabilities {
+  appVersion: string
+  buildId: string
+  packaged: boolean
   audio: {
     ffmpeg: boolean
     maxUploadMb: number
@@ -117,6 +172,7 @@ export interface Capabilities {
     }
     notice: string
     maxDurationS: number
+    previewMaxDurationS: number
     consentRequired: boolean
   }
   transcription: {
@@ -127,5 +183,9 @@ export interface Capabilities {
     }
   }
   cloudReady: boolean
+  cloud: {
+    configured: boolean
+    ready: boolean
+  }
   privacy: string
 }

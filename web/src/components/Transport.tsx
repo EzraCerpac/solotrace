@@ -1,5 +1,6 @@
 import { Icon } from './Icon'
 import { formatTime } from '../music'
+import type { AssetRole } from '../types'
 
 interface TransportProps {
   playing: boolean
@@ -13,6 +14,10 @@ interface TransportProps {
   onSeek: (time: number) => void
   onSpeed: (speed: number) => void
   onLoop: (enabled: boolean) => void
+  variant?: 'edit' | 'play'
+  track?: AssetRole
+  availableTracks?: AssetRole[]
+  onTrack?: (track: AssetRole) => void
 }
 
 export function Transport({
@@ -27,9 +32,16 @@ export function Transport({
   onSeek,
   onSpeed,
   onLoop,
+  variant = 'edit',
+  track,
+  availableTracks = [],
+  onTrack,
 }: TransportProps) {
   return (
-    <footer className="transport" aria-label="Playback controls">
+    <footer
+      className={`transport ${variant === 'play' ? 'play-transport' : ''}`}
+      aria-label="Playback controls"
+    >
       <div className="transport-main">
         <button
           className="transport-play"
@@ -53,14 +65,41 @@ export function Transport({
         <code className="transport-duration">{formatTime(duration, true)}</code>
       </div>
       <div className="transport-options">
+        {variant === 'play' && track && onTrack && (
+          <div className="transport-track-switcher" aria-label="Audio source">
+            {(
+              [
+                ['original', 'Full track', 'Full'],
+                ['lead', 'Lead only', 'Lead'],
+                ['backing', 'Backing track', 'Backing'],
+              ] as Array<[AssetRole, string, string]>
+            ).map(([role, label, shortLabel]) => (
+              <button
+                key={role}
+                type="button"
+                className={track === role ? 'active' : ''}
+                disabled={!availableTracks.includes(role)}
+                aria-label={label}
+                aria-pressed={track === role}
+                onClick={() => onTrack(role)}
+              >
+                <span className="wide-track-label">{label}</span>
+                <span className="short-track-label">{shortLabel}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <button
           className={`transport-option ${loop ? 'active' : ''}`}
           type="button"
+          aria-label={`Loop ${formatTime(loopStart)} to ${formatTime(loopEnd)}`}
           aria-pressed={loop}
           onClick={() => onLoop(!loop)}
         >
           <Icon name="loop" />
-          Loop {formatTime(loopStart)}–{formatTime(loopEnd)}
+          <span className="loop-label">
+            Loop {formatTime(loopStart)}–{formatTime(loopEnd)}
+          </span>
         </button>
         <label>
           Speed
@@ -72,9 +111,8 @@ export function Transport({
             <option value={1}>1.00×</option>
           </select>
         </label>
-        <span className="pitch-note">Pitch preserved</span>
+        {variant === 'edit' && <span className="pitch-note">Pitch preserved</span>}
       </div>
     </footer>
   )
 }
-

@@ -4,6 +4,7 @@ import type {
   FingeringMode,
   NoteEvent,
   Project,
+  ProjectSummary,
 } from './types'
 
 export class ApiError extends Error {
@@ -27,11 +28,15 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(message, response.status)
   }
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
 
 export const api = {
-  listProjects: () => request<Project[]>('/api/projects'),
+  listProjects: (includeTrashed = false) =>
+    request<ProjectSummary[]>(
+      `/api/projects${includeTrashed ? '?include_trashed=true' : ''}`,
+    ),
 
   getProject: (projectId: string) =>
     request<Project>(`/api/projects/${encodeURIComponent(projectId)}`),
@@ -39,11 +44,14 @@ export const api = {
   capabilities: () => request<Capabilities>('/api/capabilities'),
 
   saveMvsepToken: (apiToken: string) =>
-    request<{ stored: boolean; cloudReady: boolean }>('/api/settings/mvsep-token', {
+    request<{ stored: boolean; cloudReady: boolean }>('/api/settings/mvsep-key', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ api_token: apiToken }),
     }),
+
+  removeMvsepToken: () =>
+    request<void>('/api/settings/mvsep-key', { method: 'DELETE' }),
 
   createProject: (file: File, title: string, artist: string) => {
     const body = new FormData()
@@ -51,6 +59,12 @@ export const api = {
     body.set('title', title)
     body.set('artist', artist)
     return request<Project>('/api/projects', { method: 'POST', body })
+  },
+
+  importProject: (file: File) => {
+    const body = new FormData()
+    body.set('file', file)
+    return request<Project>('/api/projects/import', { method: 'POST', body })
   },
 
   processProject: (
@@ -80,23 +94,121 @@ export const api = {
       method: 'POST',
     }),
 
-  patchNotes: (projectId: string, expectedRevision: number, notes: NoteEvent[]) =>
-    request<Project>(`/api/projects/${encodeURIComponent(projectId)}/tab`, {
+  renameProject: (
+    projectId: string,
+    expectedRevision: number,
+    title: string,
+    artist: string,
+  ) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        title,
+        artist,
+      }),
+    }),
+
+  trashProject: (projectId: string, expectedRevision: number) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}/trash`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+
+  deleteProject: (projectId: string, expectedRevision: number) =>
+    request<void>(
+      `/api/projects/${encodeURIComponent(projectId)}?expected_revision=${expectedRevision}`,
+      { method: 'DELETE' },
+    ),
+
+  restoreProject: (projectId: string, expectedRevision: number) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+
+  patchWorkspace: (
+    projectId: string,
+    expectedRevision: number,
+    passage: { name: string; start_s: number; end_s: number },
+  ) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}/workspace`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision, passage }),
+    }),
+
+  patchNotes: (
+    projectId: string,
+    versionId: string,
+    expectedRevision: number,
+    notes: NoteEvent[],
+  ) =>
+    request<Project>(
+      `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/notes`,
+      {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         expected_revision: expectedRevision,
         notes,
       }),
-    }),
+      },
+    ),
 
-  refinger: (projectId: string, expectedRevision: number, mode: FingeringMode) =>
-    request<Project>(`/api/projects/${encodeURIComponent(projectId)}/refinger`, {
+  createVersion: (
+    projectId: string,
+    expectedRevision: number,
+    sourceVersionId: string,
+    mode: FingeringMode | null,
+    name?: string,
+  ) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}/versions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         expected_revision: expectedRevision,
+        source_version_id: sourceVersionId,
         mode,
+        ...(name ? { name } : {}),
       }),
     }),
+
+  activateVersion: (projectId: string, versionId: string, expectedRevision: number) =>
+    request<Project>(
+      `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/activate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_revision: expectedRevision }),
+      },
+    ),
+
+  renameVersion: (
+    projectId: string,
+    versionId: string,
+    expectedRevision: number,
+    name: string,
+  ) =>
+    request<Project>(
+      `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_revision: expectedRevision, name }),
+      },
+    ),
+
+  deleteVersion: (projectId: string, versionId: string, expectedRevision: number) =>
+    request<Project>(
+      `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`,
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_revision: expectedRevision }),
+      },
+    ),
 }

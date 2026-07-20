@@ -4,11 +4,19 @@ import { Icon } from './Icon'
 
 interface MVSepDialogProps {
   open: boolean
+  configured: boolean
   onClose: () => void
   onSave: (token: string) => Promise<void>
+  onRemove: () => Promise<void>
 }
 
-export function MVSepDialog({ open, onClose, onSave }: MVSepDialogProps) {
+export function MVSepDialog({
+  open,
+  configured,
+  onClose,
+  onSave,
+  onRemove,
+}: MVSepDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
@@ -32,6 +40,22 @@ export function MVSepDialog({ open, onClose, onSave }: MVSepDialogProps) {
       onClose()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save API key')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await onRemove()
+      setToken('')
+      onClose()
+    } catch (removeError) {
+      setError(
+        removeError instanceof Error ? removeError.message : 'Could not remove API key',
+      )
     } finally {
       setBusy(false)
     }
@@ -90,6 +114,16 @@ export function MVSepDialog({ open, onClose, onSave }: MVSepDialogProps) {
           </p>
         )}
         <div className="dialog-actions">
+          {configured && (
+            <button
+              type="button"
+              className="button danger-text"
+              onClick={() => void remove()}
+              disabled={busy}
+            >
+              Remove saved key
+            </button>
+          )}
           <button type="button" className="button secondary" onClick={onClose} disabled={busy}>
             Cancel
           </button>

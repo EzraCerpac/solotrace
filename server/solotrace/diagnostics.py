@@ -18,6 +18,11 @@ LOG_FILENAME = "solotrace.log"
 MAX_DIAGNOSTIC_LOG_BYTES = 200_000
 
 
+class _DiagnosticLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.name.startswith(("solotrace", "uvicorn.error"))
+
+
 def configure_logging(settings: Settings) -> Path:
     settings.log_dir.mkdir(parents=True, exist_ok=True)
     settings.log_dir.chmod(0o700)
@@ -37,6 +42,7 @@ def configure_logging(settings: Settings) -> Path:
         handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
         )
+        handler.addFilter(_DiagnosticLogFilter())
         root.addHandler(handler)
     root.setLevel(logging.INFO)
     path.touch(mode=0o600, exist_ok=True)
@@ -50,12 +56,18 @@ def _redact(text: str) -> str:
         text = text.replace(home, "<home>")
     text = re.sub(r"/(?:private/)?var/folders/\S+", "<temporary-path>", text)
     text = re.sub(
+        r"/(?:api/projects|media)/[^/\s\"?]+(?:/[^?\s\"]+)?",
+        "/<project-resource>",
+        text,
+    )
+    text = re.sub(
         r"\b[a-z0-9][a-z0-9-]{0,36}-[0-9a-f]{12}\b",
         "<project-id>",
         text,
     )
     text = re.sub(
-        r"(?i)(api[_ -]?token|api[_ -]?key|authorization)([\"':=\s]+)\S+",
+        r"(?i)(api[_ -]?token|api[_ -]?key|authorization|cookie|token)"
+        r"([\"':=\s]+)\S+",
         r"\1\2<redacted>",
         text,
     )

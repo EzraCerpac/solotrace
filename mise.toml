@@ -54,3 +54,16 @@ run = [
 [tasks.smoke-wheel]
 description = "Build and test the installed wheel with its bundled web app"
 run = "./scripts/smoke-wheel.sh"
+
+[tasks.package-macos]
+description = "Build an ad-hoc signed Apple-Silicon SoloTrace.app"
+run = "./scripts/package-macos.sh"
+
+[tasks.smoke-app]
+description = "Run the packaged app self-test"
+depends = ["package-macos"]
+run = "./scripts/smoke-app.sh"
+
+[tasks.release-macos]
+description = "Build, sign, notarize, staple, and checksum the beta DMG"
+run = "./scripts/release-macos.sh"

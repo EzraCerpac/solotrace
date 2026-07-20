@@ -39,6 +39,8 @@ def delete_mvsep_token() -> None:
 
 
 def _mvsep_token() -> str | None:
+    if os.environ.get("SOLOTRACE_DISABLE_KEYCHAIN") == "1":
+        return None
     configured = (
         os.environ.get("SOLOTRACE_MVSEP_API_TOKEN") if not PACKAGED else None
     )

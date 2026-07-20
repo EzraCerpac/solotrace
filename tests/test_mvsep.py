@@ -6,6 +6,7 @@ import httpx
 import numpy as np
 import pytest
 import soundfile as sf
+from solotrace.audio import AudioProcessingError
 from solotrace.mvsep import MVSepApi, MVSepCancelled
 
 
@@ -135,3 +136,116 @@ def test_mvsep_client_cancels_remote_job(tmp_path) -> None:
         )
 
     assert cancelled_remote is True
+
+
+def test_mvsep_rejects_final_redirect_outside_allowlist(tmp_path) -> None:
+    wave = _wave_bytes()
+    input_path = tmp_path / "input.wav"
+    input_path.write_bytes(wave)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/separation/create":
+            request.read()
+            return httpx.Response(
+                200,
+                json={"success": True, "data": {"hash": "job-123"}},
+            )
+        if request.url.path == "/api/separation/get":
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "status": "done",
+                    "data": {
+                        "files": [
+                            {
+                                "type": "Lead-guitar",
+                                "url": "https://de.mvsep.com/download/lead.wav",
+                            }
+                        ]
+                    },
+                },
+            )
+        if request.url.host == "de.mvsep.com":
+            return httpx.Response(
+                302,
+                headers={"location": "https://attacker.invalid/lead.wav"},
+            )
+        if request.url.host == "attacker.invalid":
+            return httpx.Response(200, content=wave)
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    output = tmp_path / "lead.wav"
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(handler),
+            follow_redirects=True,
+        ) as client,
+        pytest.raises(AudioProcessingError, match="unsafe download"),
+    ):
+        MVSepApi(
+            api_token="secret",
+            base_url="https://de.mvsep.com/api",
+            poll_seconds=0,
+            timeout_seconds=60,
+            client=client,
+        ).separate(
+            input_path,
+            output,
+            progress=lambda _: None,
+            cancelled=lambda: False,
+        )
+    assert not output.exists()
+
+
+def test_mvsep_download_honors_cancellation_and_removes_partial_file(tmp_path) -> None:
+    wave = _wave_bytes()
+    input_path = tmp_path / "input.wav"
+    input_path.write_bytes(wave)
+    checks = iter([False, False, True])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/separation/create":
+            request.read()
+            return httpx.Response(
+                200,
+                json={"success": True, "data": {"hash": "job-123"}},
+            )
+        if request.url.path == "/api/separation/get":
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "status": "done",
+                    "data": {
+                        "files": [
+                            {
+                                "type": "Lead-guitar",
+                                "url": "https://de.mvsep.com/download/lead.wav",
+                            }
+                        ]
+                    },
+                },
+            )
+        if request.url.path == "/download/lead.wav":
+            return httpx.Response(200, content=wave)
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    output = tmp_path / "lead.wav"
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(MVSepCancelled, match="Draft cancelled"),
+    ):
+        MVSepApi(
+            api_token="secret",
+            base_url="https://de.mvsep.com/api",
+            poll_seconds=0,
+            timeout_seconds=60,
+            client=client,
+        ).separate(
+            input_path,
+            output,
+            progress=lambda _: None,
+            cancelled=lambda: next(checks, True),
+        )
+    assert not output.exists()

@@ -3,8 +3,8 @@
 SoloTrace turns a recorded guitar solo into a synchronized, editable tab and a
 practice backing track. It opens with a generated demo, and projects remain in a
 private local library.
-Lead separation is cloud-assisted through MVSep; transcription and editing stay
-local.
+The private macOS beta offers an offline preview and an optional, explicitly
+consented MVSep cloud path; transcription and editing stay local.
 
 The honest product promise is **accurate notes with playable, editable
 fingerings**. Audio rarely reveals which of several equivalent string and fret
@@ -15,18 +15,21 @@ positions a guitarist used.
 - Import common audio formats and transcribe the whole lead or a marked passage.
 - Create a local transcription draft with exact audio times and score times.
 - Switch between full mix, estimated lead, and backing audio without losing position.
-- Edit string, fret, timing, pitch, technique, and confidence per note.
-- Regenerate only the fingering as balanced, easiest, or position-focused.
+- Accept, edit, reopen, delete, and undo low-confidence notes.
+- Keep named tab versions; switching style creates a new balanced, easiest, or
+  position-focused version without replacing the source.
+- Rename, trash, restore, and reopen song projects.
 - Loop a passage and slow playback while preserving pitch.
-- Export native project JSON, MusicXML 4.0, MIDI, ASCII tab, or a ZIP with audio.
+- Export the active tab as JSON, MusicXML 4.0, MIDI, or ASCII; export one bundle
+  containing every version and the shared audio.
 - Start instantly with the exact-stem `Northbound Lights` synthetic demo.
 
 Uploaded songs use one selected route:
 
-- **MVSep one-stage Lead/Rhythm:** foreground lead separation in MVSep's Germany
+- **Experimental MVSep lead estimate:** foreground lead separation in MVSep's Germany
   cloud region, followed by local Spotify Basic Pitch note and bend transcription.
-- **Offline fallback:** frequency-focused separation plus librosa pYIN, used only
-  when the MVSep token or Basic Pitch worker is unavailable.
+- **Offline preview:** frequency-focused separation plus librosa pYIN, always
+  available without a key or network connection.
 
 Every cloud run requires explicit confirmation that the user has rights to the
 audio. Only the selected range is uploaded.
@@ -36,7 +39,7 @@ audio. Only the selected range is uploaded.
 ```mermaid
 flowchart LR
   UI["React tracing table"] --> API["FastAPI local service"]
-  API --> DB["SQLite revisions"]
+  API --> DB["SQLite projects, versions, reviews"]
   API --> MEDIA["Project audio files"]
   API --> PIPE["Single processing pipeline"]
   PIPE --> SEP["MVSep lead separation"]
@@ -75,13 +78,9 @@ mise run web
 The Vite app runs at <http://127.0.0.1:5173> and proxies `/api` and `/media` to
 the Python service.
 
-On macOS, SoloTrace reads the MVSep token from Keychain service
-`com.solotrace.mvsep`, account `solotrace`. Store or replace it without exposing
-it in shell history:
-
-```bash
-security add-generic-password -a solotrace -s com.solotrace.mvsep -U -w
-```
+The macOS app stores a tester-supplied MVSep key through Keychain service
+`com.ezracerpac.solotrace`. Add, replace, or remove it from the app; it is never
+passed through shell commands.
 
 On Linux, set `SOLOTRACE_MVSEP_API_TOKEN`.
 
@@ -98,7 +97,14 @@ uv build --wheel
 ```bash
 mise run check
 mise run smoke-wheel
+mise run package-macos
+mise run smoke-app
 ```
+
+`package-macos` creates an ad-hoc signed Apple-Silicon `SoloTrace.app`. It builds
+and bundles a pinned LGPL-only FFmpeg from official source. A Developer ID
+identity and notarization keychain profile are required for `mise run
+release-macos`; that command emits the notarized DMG and SHA-256 checksum.
 
 Tests focus on the parts that protect real work: fingering legality, revision
 conflicts, parseable exports, exact demo stems, media range requests, and the
@@ -114,10 +120,9 @@ The full lead path is:
 4. Playability optimization across legal string/fret positions.
 5. Manual synchronized correction.
 
-The UI selects MVSep automatically when both its token and the Basic Pitch worker
-are available. Free MVSep accounts allow one concurrent API job, lossless 16-bit
-WAV output, and inputs up to 10 minutes. The local Basic Pitch worker uses about
-400 MB.
+The UI defaults to offline preview. MVSep is a separate explicit choice when a
+key and the bundled Basic Pitch/CoreML runtime are available. Cloud selections
+may be at most 10 minutes; offline selections may be at most 3 minutes.
 See [`docs/lead-separation-benchmark-results.md`](docs/lead-separation-benchmark-results.md)
 for the separator decision and
 [`docs/model-benchmark-results.md`](docs/model-benchmark-results.md) for the
@@ -129,8 +134,9 @@ Runtime data uses the private per-user application-data directory
 (`~/Library/Application Support/SoloTrace` on macOS, the XDG data directory on
 Linux). Set `SOLOTRACE_DATA_DIR` to override it.
 
-The transcription worker defaults to `.workers` in a source checkout. Set
-`SOLOTRACE_WORKER_DIR` when starting an installed wheel from elsewhere.
+Source development can still use the isolated `.workers` transcription
+environment. The native app reuses its own executable as the Basic Pitch worker
+and has no external worker environment.
 
 ```text
 SoloTrace/
@@ -142,8 +148,17 @@ SoloTrace/
         └── backing-run-<id>.wav
 ```
 
-Generated proposals and user edits receive distinct revisions. A stale editor
-gets HTTP `409` instead of silently overwriting a newer revision.
+Each song stores shared audio and named tab versions. Notes keep model confidence
+separate from the musician's reviewed/unreviewed decision. A project-wide
+revision token protects every edit, version action, title, trash state, and
+marked passage; a stale editor gets HTTP `409` instead of silently overwriting
+newer work. Processing and draft-style actions always create a new version.
+Projects in Trash remain recoverable.
+
+The browser remembers the last project plus track, speed, loop, and draft scope.
+SQLite remains the source of truth for projects, versions, note reviews, names,
+marked passages, and trash state. Playback position and note selection
+intentionally reset when reopening.
 Data/project directories are created owner-only; the SQLite file is owner-readable
 and owner-writable.
 

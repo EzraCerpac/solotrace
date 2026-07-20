@@ -85,6 +85,7 @@ class MVSepApi:
         client: httpx.Client,
         raw_url: str,
         output_path: Path,
+        cancelled: CancelCheck,
     ) -> None:
         url = urljoin(f"{self.base_url}/", raw_url)
         parsed = urlparse(url)
@@ -111,12 +112,18 @@ class MVSepApi:
                         )
                 with output_path.open("wb") as output:
                     for chunk in response.iter_bytes():
+                        if cancelled():
+                            raise MVSepCancelled("Draft cancelled")
                         size += len(chunk)
                         if size > _MAX_DOWNLOAD_BYTES:
                             raise AudioProcessingError("MVSep lead stem is unexpectedly large")
                         output.write(chunk)
         except httpx.HTTPError as error:
+            output_path.unlink(missing_ok=True)
             raise AudioProcessingError("Could not download MVSep lead stem") from error
+        except Exception:
+            output_path.unlink(missing_ok=True)
+            raise
 
     @staticmethod
     def _lead_url(payload: dict[str, Any]) -> str:
@@ -205,7 +212,12 @@ class MVSepApi:
                 status = str(payload.get("status", "")).lower()
                 if status == "done":
                     progress("Downloading lossless lead stem")
-                    self._download(client, self._lead_url(payload), output_path)
+                    self._download(
+                        client,
+                        self._lead_url(payload),
+                        output_path,
+                        cancelled,
+                    )
                     return
                 if status == "failed" or payload.get("success") is False:
                     raise AudioProcessingError(

@@ -21,6 +21,7 @@ from .models import (
     StageState,
     SyncAnchor,
     TabDocument,
+    TabVersion,
 )
 from .storage import ProjectStore
 
@@ -272,12 +273,20 @@ def ensure_demo(store: ProjectStore) -> Project:
         duration_s=duration_s,
         passage=Passage(name="Solo 1", start_s=1.0, end_s=16.8),
         assets=assets,
-        tab=TabDocument(
-            sample_rate=SAMPLE_RATE,
-            tempo_bpm=TEMPO_BPM,
-            sync_anchors=anchors,
-            notes=notes,
-        ),
+        versions=[
+            TabVersion(
+                id="version-demo",
+                name="Demo tab",
+                source="demo",
+                tab=TabDocument(
+                    sample_rate=SAMPLE_RATE,
+                    tempo_bpm=TEMPO_BPM,
+                    sync_anchors=anchors,
+                    notes=notes,
+                ),
+            )
+        ],
+        active_version_id="version-demo",
         run=ProcessingRun(
             id="demo-run",
             state=RunState.complete,

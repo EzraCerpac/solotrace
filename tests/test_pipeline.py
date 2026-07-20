@@ -36,7 +36,7 @@ def test_startup_terminalizes_orphaned_processing_run(tmp_path) -> None:
         DEMO_ID,
         lambda current: current.model_copy(update={"run": orphan}),
         reason="simulate crash",
-        expected_revision=project.tab.revision,
+        expected_revision=project.revision,
     )
 
     pipeline = Pipeline(store)
@@ -89,7 +89,7 @@ def test_mvsep_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> None
         end_s=5,
         tuning=project.tab.tuning,
         fret_count=project.tab.fret_count,
-        expected_revision=project.tab.revision,
+        expected_revision=project.revision,
         engine="mvsep",
         cloud_consent=True,
     )
@@ -104,6 +104,9 @@ def test_mvsep_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> None
 
     assert finished is not None
     assert finished.run.state == RunState.complete
+    assert len(finished.versions) == len(project.versions) + 1
+    assert finished.active_version.name == "Lead draft"
+    assert finished.versions[0].tab == project.tab
     assert finished.separation_scope == "solo-guitar"
     assert finished.asset("lead").method == "MVSep one-stage lead-guitar estimate"
     assert any("MVSep" in item for item in finished.provenance)
