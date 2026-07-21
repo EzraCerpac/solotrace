@@ -14,8 +14,11 @@ __pycache__/
 .coverage
 htmlcov/
 node_modules/
+.pnpm-store/
 web/dist/
 build
+!site/build/
+!site/build/**
 dist
 vendor/ffmpeg
 data/

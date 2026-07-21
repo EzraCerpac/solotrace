@@ -1,11 +1,19 @@
 {
   "name": "solotrace",
   "private": true,
+  "packageManager": "pnpm@11.15.1",
   "scripts": {
     "dev": "pnpm --dir web dev",
+    "dev:site": "pnpm --dir site dev",
     "build": "pnpm --dir web build",
+    "build:site": "pnpm --dir site build",
+    "check": "pnpm check:editor && pnpm check:web && pnpm check:site",
+    "test": "pnpm test:editor && pnpm test:web && pnpm test:site",
     "test:web": "pnpm --dir web test",
-    "check:web": "pnpm --dir web check"
+    "test:editor": "pnpm --dir packages/editor test",
+    "test:site": "pnpm --dir site test",
+    "check:web": "pnpm --dir web check",
+    "check:editor": "pnpm --dir packages/editor check",
+    "check:site": "pnpm --dir site lint"
   }
 }
-

@@ -10,7 +10,7 @@ if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
 fi
 
 cd "$root"
-pnpm --dir web build
+pnpm build
 ./scripts/build-ffmpeg-macos.sh
 UV_CACHE_DIR="$root/.uv-cache" uv sync --locked --no-dev --group desktop
 UV_CACHE_DIR="$root/.uv-cache" uv run --frozen --no-dev python \

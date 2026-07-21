@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="SoloTrace">
+  <rect width="64" height="64" rx="8" fill="#172228"/>
+  <path d="M10 18h44M10 26h44M10 34h44M10 42h44" stroke="#dce3df" stroke-width="2"/>
+  <path d="M9 35c7 0 7-9 14-9s7 16 14 16 7-13 18-13" fill="none" stroke="#4eb0a6" stroke-width="4"/>
+  <rect x="24" y="17" width="17" height="18" rx="3" fill="#f3f5f1" stroke="#172228"/>
+  <text x="32.5" y="30" fill="#172228" font-family="monospace" font-size="12" text-anchor="middle">12</text>
+</svg>

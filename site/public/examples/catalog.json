@@ -1,0 +1,124 @@
+[
+  {
+    "audio": {
+      "backing": "/examples/northbound-lights/backing.wav",
+      "lead": "/examples/northbound-lights/lead.wav",
+      "original": "/examples/northbound-lights/original.wav"
+    },
+    "durationS": 18.0,
+    "license": "CC0-1.0",
+    "peaksUrl": "/examples/northbound-lights/peaks.json",
+    "projectUrl": "/examples/northbound-lights/project.json",
+    "provenance": [
+      "Original SoloTrace synthetic melody and audio, dedicated to CC0 1.0.",
+      "Generated deterministically by SoloTrace; no recording, cloud service, or runtime compute used."
+    ],
+    "slug": "northbound-lights",
+    "summary": "A spacious melodic solo with expressive bends, vibrato, and notes to review.",
+    "techniques": [
+      "bend",
+      "vibrato"
+    ],
+    "tempoBpm": 92.0,
+    "timeSignature": [
+      4,
+      4
+    ],
+    "title": "Northbound Lights",
+    "tuning": [
+      40,
+      45,
+      50,
+      55,
+      59,
+      64
+    ],
+    "tuningLabel": "Standard",
+    "versionNames": [
+      "Balanced"
+    ]
+  },
+  {
+    "audio": {
+      "backing": "/examples/switchback-run/backing.wav",
+      "lead": "/examples/switchback-run/lead.wav",
+      "original": "/examples/switchback-run/original.wav"
+    },
+    "durationS": 14.0,
+    "license": "CC0-1.0",
+    "peaksUrl": "/examples/switchback-run/peaks.json",
+    "projectUrl": "/examples/switchback-run/project.json",
+    "provenance": [
+      "Original SoloTrace synthetic melody and audio, dedicated to CC0 1.0.",
+      "Generated deterministically by SoloTrace; no recording, cloud service, or runtime compute used."
+    ],
+    "slug": "switchback-run",
+    "summary": "A quick legato line for tracing hammer-ons, pull-offs, and connecting slides.",
+    "techniques": [
+      "hammer-on",
+      "pull-off",
+      "slide"
+    ],
+    "tempoBpm": 144.0,
+    "timeSignature": [
+      4,
+      4
+    ],
+    "title": "Switchback Run",
+    "tuning": [
+      40,
+      45,
+      50,
+      55,
+      59,
+      64
+    ],
+    "tuningLabel": "Standard",
+    "versionNames": [
+      "Balanced"
+    ]
+  },
+  {
+    "audio": {
+      "backing": "/examples/low-orbit/backing.wav",
+      "lead": "/examples/low-orbit/lead.wav",
+      "original": "/examples/low-orbit/original.wav"
+    },
+    "durationS": 18.0,
+    "license": "CC0-1.0",
+    "peaksUrl": "/examples/low-orbit/peaks.json",
+    "projectUrl": "/examples/low-orbit/project.json",
+    "provenance": [
+      "Original SoloTrace synthetic melody and audio, dedicated to CC0 1.0.",
+      "Generated deterministically by SoloTrace; no recording, cloud service, or runtime compute used."
+    ],
+    "slug": "low-orbit",
+    "summary": "A Drop D phrase in 6/8 with three playable fingering approaches to compare.",
+    "techniques": [
+      "hammer-on",
+      "pull-off",
+      "slide",
+      "vibrato"
+    ],
+    "tempoBpm": 96.0,
+    "timeSignature": [
+      6,
+      8
+    ],
+    "title": "Low Orbit",
+    "tuning": [
+      38,
+      45,
+      50,
+      55,
+      59,
+      64
+    ],
+    "tuningLabel": "Drop D",
+    "versionNames": [
+      "Balanced",
+      "Easiest",
+      "One Position"
+    ]
+  }
+]

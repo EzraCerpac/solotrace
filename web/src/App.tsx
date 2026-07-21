@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, ApiError } from './api'
+import { desktopEditorClient, toDesktopProject } from './editor-client'
 import { Icon } from './components/Icon'
 import { MVSepDialog } from './components/MVSepDialog'
 import { NoteInspector } from './components/NoteInspector'
@@ -28,6 +29,14 @@ import type {
 } from './types'
 
 const LAST_PROJECT_KEY = 'solotrace.lastProject'
+
+async function loadDesktopProject(projectId: string): Promise<Project> {
+  const editorProject = await desktopEditorClient.loadProject({
+    origin: 'local',
+    id: projectId,
+  })
+  return toDesktopProject(editorProject)
+}
 
 function projectSubtitle(project: Project): string {
   return [project.artist, project.source_name].filter(Boolean).join(' · ')
@@ -136,7 +145,7 @@ function App() {
         activeProjects.at(0) ??
         null
       const initial = initialSummary
-        ? await api.getProject(initialSummary.id)
+        ? await loadDesktopProject(initialSummary.id)
         : null
       setProject(initial)
       setPassage(initial?.passage ?? null)
@@ -399,18 +408,23 @@ function App() {
     setUndoDelete(null)
     setProject({ ...project, tab: { ...project.tab, notes } })
     try {
-      const updated = await api.patchNotes(
-        project.id,
-        project.active_version_id,
-        project.revision,
-        notes,
+      const updated = toDesktopProject(
+        await desktopEditorClient.applyVersionAction({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          action: {
+            type: 'replace-notes',
+            versionId: project.active_version_id,
+            notes,
+          },
+        }),
       )
       adoptProject(updated, false)
       setNotice(message)
       return updated
     } catch (saveError) {
       if (saveError instanceof ApiError && saveError.status === 409) {
-        const fresh = await api.getProject(project.id)
+        const fresh = await loadDesktopProject(project.id)
         adoptProject(fresh)
         setError('A newer edit won. Reloaded latest notes; try your change again.')
       } else {
@@ -560,11 +574,13 @@ function App() {
     savingRef.current = true
     setSaving(true)
     try {
-      const next = await api.createVersion(
-        project.id,
-        project.revision,
-        project.active_version_id,
-        mode,
+      const next = toDesktopProject(
+        await desktopEditorClient.refingerProject({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          sourceVersionId: project.active_version_id,
+          mode,
+        }),
       )
       adoptProject(next, false)
       setSelectedNoteId(null)
@@ -587,7 +603,7 @@ function App() {
     audioRef.current?.pause()
     setSaving(true)
     try {
-      const next = await api.getProject(summary.id)
+      const next = await loadDesktopProject(summary.id)
       const preferences = readPreferences(next.id)
       setProject(next)
       setPassage(next.passage)
@@ -623,10 +639,12 @@ function App() {
     savingRef.current = true
     setSaving(true)
     try {
-      const next = await api.activateVersion(
-        project.id,
-        version.id,
-        project.revision,
+      const next = toDesktopProject(
+        await desktopEditorClient.applyVersionAction({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          action: { type: 'activate', versionId: version.id },
+        }),
       )
       adoptProject(next, false)
       setSelectedNoteId(null)
@@ -667,11 +685,12 @@ function App() {
     savingRef.current = true
     setSaving(true)
     try {
-      const next = await api.renameVersion(
-        project.id,
-        version.id,
-        project.revision,
-        name,
+      const next = toDesktopProject(
+        await desktopEditorClient.applyVersionAction({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          action: { type: 'rename', versionId: version.id, name },
+        }),
       )
       adoptProject(next, false)
       setNotice('Version renamed')
@@ -688,10 +707,12 @@ function App() {
     savingRef.current = true
     setSaving(true)
     try {
-      const next = await api.deleteVersion(
-        project.id,
-        version.id,
-        project.revision,
+      const next = toDesktopProject(
+        await desktopEditorClient.applyVersionAction({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          action: { type: 'delete', versionId: version.id },
+        }),
       )
       adoptProject(next, false)
       setSelectedNoteId(null)

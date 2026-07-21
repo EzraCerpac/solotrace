@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from solotrace.fingering import assign_fingerings, legal_fingerings
+import pytest
+from solotrace.fingering import (
+    assign_fingerings,
+    legal_fingerings,
+    validate_connected_technique_fingerings,
+)
 from solotrace.models import Confidence, NoteEvent
 
 
-def note(note_id: str, midi_pitch: int, onset: float) -> NoteEvent:
+def note(
+    note_id: str,
+    midi_pitch: int,
+    onset: float,
+    techniques: list[str] | None = None,
+) -> NoteEvent:
     return NoteEvent(
         id=note_id,
         onset_frame=round(onset * 44_100),
@@ -16,6 +26,7 @@ def note(note_id: str, midi_pitch: int, onset: float) -> NoteEvent:
         midi_pitch=midi_pitch,
         string=1,
         fret=0,
+        techniques=techniques or [],
         confidence=Confidence(pitch=0.9, onset=0.9, fingering=0.5, technique=0.8),
     )
 
@@ -77,3 +88,47 @@ def test_user_locked_fingering_survives_global_refinger() -> None:
     )
 
     assert (arranged[0].string, arranged[0].fret) == (2, 10)
+
+
+def test_connected_techniques_constrain_path_and_alternatives() -> None:
+    arranged = assign_fingerings(
+        [
+            note("picked", 64, 0),
+            note("hammer", 67, 0.5, ["hammer-on"]),
+            note("pull", 65, 1.0, ["pull-off"]),
+            note("slide", 69, 1.5, ["slide"]),
+        ],
+        [40, 45, 50, 55, 59, 64],
+        22,
+    )
+
+    validate_connected_technique_fingerings(arranged)
+    assert len({event.string for event in arranged}) == 1
+    assert arranged[1].fret > arranged[0].fret
+    assert arranged[2].fret < arranged[1].fret
+    assert arranged[3].fret != arranged[2].fret
+    for event in arranged:
+        assert event.alternatives
+        assert {alternative.string for alternative in event.alternatives} == {event.string}
+
+
+def test_invalid_connected_technique_has_actionable_error() -> None:
+    with pytest.raises(ValueError, match="cannot start with hammer-on"):
+        assign_fingerings(
+            [note("first", 67, 0, ["hammer-on"])],
+            [40, 45, 50, 55, 59, 64],
+            22,
+        )
+
+    previous = note("previous", 64, 0).model_copy(
+        update={"string": 1, "fret": 0, "user_locked": True}
+    )
+    destination = note("destination", 67, 0.5, ["hammer-on"]).model_copy(
+        update={"string": 2, "fret": 8, "user_locked": True}
+    )
+    with pytest.raises(ValueError, match="no playable connection"):
+        assign_fingerings(
+            [previous, destination],
+            [40, 45, 50, 55, 59, 64],
+            22,
+        )

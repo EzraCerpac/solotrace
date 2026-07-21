@@ -7,7 +7,7 @@ trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 
 cd "$project_root"
 export UV_CACHE_DIR="$project_root/.uv-cache"
-pnpm --dir web build
+pnpm build
 uv build --wheel --out-dir "$scratch/dist"
 uv venv "$scratch/venv" --python 3.11
 uv pip install \

@@ -7,6 +7,8 @@ from typing import Literal
 from .models import Fingering, NoteEvent
 
 FingeringMode = Literal["balanced", "easiest", "position"]
+ConnectedTechnique = Literal["hammer-on", "pull-off", "slide"]
+SLIDE_TECHNIQUES = {"slide", "slide-up", "slide-down"}
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,49 @@ WEIGHTS: dict[FingeringMode, Weights] = {
     "easiest": Weights(1.35, 0.22, 0.06, -0.2, 0.02),
     "position": Weights(2.25, 0.14, 0.012, 0.4, 0.12),
 }
+
+
+def connected_technique(note: NoteEvent) -> ConnectedTechnique | None:
+    """Return a connection owned by its destination note."""
+    connections: list[ConnectedTechnique] = []
+    if "hammer-on" in note.techniques:
+        connections.append("hammer-on")
+    if "pull-off" in note.techniques:
+        connections.append("pull-off")
+    if any(technique in SLIDE_TECHNIQUES for technique in note.techniques):
+        connections.append("slide")
+    if len(connections) > 1:
+        raise ValueError(f"Note {note.id} has conflicting connected techniques")
+    return connections[0] if connections else None
+
+
+def _connection_is_playable(
+    technique: ConnectedTechnique,
+    previous: Fingering | NoteEvent,
+    current: Fingering | NoteEvent,
+) -> bool:
+    if previous.string != current.string:
+        return False
+    if technique == "hammer-on":
+        return current.fret > previous.fret
+    if technique == "pull-off":
+        return current.fret < previous.fret
+    return current.fret != previous.fret
+
+
+def validate_connected_technique_fingerings(notes: list[NoteEvent]) -> None:
+    """Validate same-string, directional connections in a finished phrase."""
+    for index, note in enumerate(notes):
+        technique = connected_technique(note)
+        if technique is None:
+            continue
+        if index == 0:
+            raise ValueError(f"Note {note.id} cannot start with {technique}")
+        if not _connection_is_playable(technique, notes[index - 1], note):
+            raise ValueError(
+                f"{technique} on note {note.id} must connect from the previous "
+                "note on the same string"
+            )
 
 
 def legal_fingerings(
@@ -105,16 +150,24 @@ def assign_fingerings(
 
     costs: list[list[float]] = []
     parents: list[list[int]] = []
+    first_technique = connected_technique(notes[0])
+    if first_technique is not None:
+        raise ValueError(f"Note {notes[0].id} cannot start with {first_technique}")
     costs.append([_local_cost(choice, weights) for choice in candidates[0]])
     parents.append([-1] * len(candidates[0]))
 
     for note_index in range(1, len(notes)):
+        technique = connected_technique(notes[note_index])
         row_costs: list[float] = []
         row_parents: list[int] = []
         for current in candidates[note_index]:
             best_cost = inf
-            best_parent = 0
+            best_parent = -1
             for parent_index, previous in enumerate(candidates[note_index - 1]):
+                if technique is not None and not _connection_is_playable(
+                    technique, previous, current
+                ):
+                    continue
                 cost = (
                     costs[note_index - 1][parent_index]
                     + _transition_cost(previous, current, weights)
@@ -125,6 +178,12 @@ def assign_fingerings(
                     best_parent = parent_index
             row_costs.append(best_cost)
             row_parents.append(best_parent)
+        if all(parent < 0 for parent in row_parents):
+            label = technique or "Fingering"
+            raise ValueError(
+                f"{label} on note {notes[note_index].id} has no playable "
+                "connection from the previous note"
+            )
         costs.append(row_costs)
         parents.append(row_parents)
 
@@ -136,6 +195,30 @@ def assign_fingerings(
     output: list[NoteEvent] = []
     for note_index, note in enumerate(notes):
         choice = candidates[note_index][selected[note_index]]
+        incoming = connected_technique(note)
+        next_note = notes[note_index + 1] if note_index + 1 < len(notes) else None
+        outgoing = connected_technique(next_note) if next_note is not None else None
+        viable_candidates = [
+            candidate
+            for candidate in candidates[note_index]
+            if (
+                incoming is None
+                or note_index == 0
+                or _connection_is_playable(
+                    incoming,
+                    candidates[note_index - 1][selected[note_index - 1]],
+                    candidate,
+                )
+            )
+            and (
+                outgoing is None
+                or _connection_is_playable(
+                    outgoing,
+                    candidate,
+                    candidates[note_index + 1][selected[note_index + 1]],
+                )
+            )
+        ]
         ranked = sorted(
             (
                 candidate.model_copy(
@@ -147,7 +230,7 @@ def assign_fingerings(
                         )
                     }
                 )
-                for candidate in candidates[note_index]
+                for candidate in viable_candidates
             ),
             key=lambda item: item.cost,
         )

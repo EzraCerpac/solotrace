@@ -42,6 +42,25 @@ Uploaded songs use one selected route:
 Every cloud run requires explicit confirmation that the user has rights to the
 audio. Only the selected range is uploaded.
 
+## Hosted example studio
+
+`site/` is a separate public Sites/Vinext shell for learning the editor without
+an API key. It includes Northbound Lights, Switchback Run, and Low Orbit as
+deterministic CC0 projects with exact full-mix, lead, and backing stems.
+
+Anonymous visitors can play, edit, refinger, compare versions, and export in the
+browser. Drafts stay in device-local storage. Sign in with ChatGPT is required
+only to keep up to three private saved copies in D1; SoloTrace stores an HMAC
+owner identifier instead of the raw email address. The hosted edition accepts no
+uploads and runs no separation or transcription compute.
+
+```bash
+pnpm install
+pnpm dev:site
+```
+
+Personal-audio processing remains a desktop feature.
+
 ## Architecture
 
 ```mermaid
@@ -189,10 +208,14 @@ and owner-writable.
 
 ## Copyright and privacy
 
-Import and upload only audio you are allowed to process. Project metadata,
+Import and upload only audio you are allowed to process. Desktop project metadata,
 edits, and exported tabs remain local. A confirmed cloud run sends the selected
 audio range to MVSep's Germany region and downloads a lossless lead stem; see
 MVSep's privacy policy and terms before use.
+
+The hosted example studio never accepts personal audio. Anonymous drafts stay in
+the browser; signed-in saved copies store only the edited example document and a
+server-derived owner identifier.
 
 SoloTrace does not fetch YouTube URLs:
 local URL downloading adds platform-terms, copyright, and server-side request

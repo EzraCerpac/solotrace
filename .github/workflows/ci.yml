@@ -45,13 +45,13 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install locked web dependencies
-        run: pnpm --dir web install --frozen-lockfile
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build packaged web assets
-        run: pnpm --dir web build
+        run: pnpm build
 
       - name: Install locked Python dependencies
         run: uv sync --locked --group dev
@@ -64,8 +64,15 @@ jobs:
 
       - name: Check and test web app
         run: |
-          pnpm --dir web check
-          pnpm --dir web test
+          pnpm check:editor
+          pnpm test:editor
+          pnpm check:web
+          pnpm test:web
+
+      - name: Check and test hosted example studio
+        run: |
+          pnpm check:site
+          pnpm test:site
 
       - name: Smoke installed wheel
         run: ./scripts/smoke-wheel.sh

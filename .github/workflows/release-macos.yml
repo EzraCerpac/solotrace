@@ -50,7 +50,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Validate release input and credentials
         env:
@@ -84,7 +84,7 @@ jobs:
       - name: Install locked dependencies
         run: |
           uv sync --locked --no-dev --group desktop
-          pnpm --dir web install --frozen-lockfile
+          pnpm install --frozen-lockfile
 
       - name: Import signing and notarization credentials
         env:
