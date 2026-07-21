@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/EzraCerpac/solotrace/actions/workflows/ci.yml/badge.svg)](https://github.com/EzraCerpac/solotrace/actions/workflows/ci.yml)
 
-SoloTrace turns a recorded guitar solo into a synchronized, editable tab and a
-practice backing track. It opens with a generated demo, and projects remain in a
-private local library.
+SoloTrace turns a song's guitar part into a synchronized, editable tab and a
+practice backing track. It transcribes the full song by default, opens with a
+generated demo, and keeps projects in a private local library.
 The private macOS beta offers an offline preview and an optional, explicitly
 consented MVSep cloud path; transcription and editing stay local.
 
@@ -20,7 +20,8 @@ see [`PRIVATE_BETA_TERMS.md`](PRIVATE_BETA_TERMS.md).
 
 ## What works
 
-- Import common audio formats and transcribe the whole lead or a marked passage.
+- Import common audio formats and transcribe the full song or optionally limit it
+  to a selected section.
 - Create a local transcription draft with exact audio times and score times.
 - Switch between full mix, estimated lead, and backing audio without losing position.
 - Accept, edit, reopen, delete, and undo low-confidence notes.
@@ -40,7 +41,7 @@ Uploaded songs use one selected route:
   available without a key or network connection.
 
 Every cloud run requires explicit confirmation that the user has rights to the
-audio. Only the selected range is uploaded.
+audio. Only the chosen range is uploaded.
 
 ## Hosted example studio
 
@@ -158,15 +159,16 @@ prerelease, and attaches its SHA-256 checksum.
 
 The full lead path is:
 
-1. MVSep one-stage Lead/Rhythm separation for the whole song or marked passage.
+1. MVSep one-stage Lead/Rhythm separation for the whole song or selected section.
 2. Local Spotify Basic Pitch polyphonic note and bend estimation.
 3. librosa beat estimation while retaining exact audio timestamps.
 4. Playability optimization across legal string/fret positions.
 5. Manual synchronized correction.
 
 The UI defaults to offline preview. MVSep is a separate explicit choice when a
-key and the bundled Basic Pitch/CoreML runtime are available. Cloud selections
-may be at most 10 minutes; offline selections may be at most 3 minutes.
+key and the bundled Basic Pitch/CoreML runtime are available. MVSep selections
+may be at most 10 minutes. Offline transcription accepts any song allowed by the
+30-minute importer and processes long audio in cancellable, bounded-memory chunks.
 See [`docs/lead-separation-benchmark-results.md`](docs/lead-separation-benchmark-results.md)
 for the separator decision and
 [`docs/model-benchmark-results.md`](docs/model-benchmark-results.md) for the
@@ -195,13 +197,13 @@ SoloTrace/
 Each song stores shared audio and named tab versions. Notes keep model confidence
 separate from the musician's reviewed/unreviewed decision. A project-wide
 revision token protects every edit, version action, title, trash state, and
-marked passage; a stale editor gets HTTP `409` instead of silently overwriting
+selected section; a stale editor gets HTTP `409` instead of silently overwriting
 newer work. Processing and draft-style actions always create a new version.
 Projects in Trash remain recoverable.
 
 The browser remembers the last project plus track, speed, loop, and draft scope.
 SQLite remains the source of truth for projects, versions, note reviews, names,
-marked passages, and trash state. Playback position and note selection
+selected sections, and trash state. Playback position and note selection
 intentionally reset when reopening.
 Data/project directories are created owner-only; the SQLite file is owner-readable
 and owner-writable.
@@ -209,7 +211,7 @@ and owner-writable.
 ## Copyright and privacy
 
 Import and upload only audio you are allowed to process. Desktop project metadata,
-edits, and exported tabs remain local. A confirmed cloud run sends the selected
+edits, and exported tabs remain local. A confirmed cloud run sends the chosen
 audio range to MVSep's Germany region and downloads a lossless lead stem; see
 MVSep's privacy policy and terms before use.
 

@@ -18,11 +18,13 @@ receive a Developer ID signed and notarized DMG.
 
 ## Create a draft
 
+- SoloTrace transcribes the full song by default. Enable **Limit to a section**
+  only when you want to drag a smaller range on the waveform.
 - **Offline preview** stays on the Mac and remains available without a key or
-  network connection.
+  network connection. It accepts any song allowed by the importer.
 - **Experimental MVSep lead estimate** uploads only the range selected for that
-  run. It requires a tester-owned MVSep key and a new rights/consent check for
-  every run.
+  run and supports at most 10 minutes. It requires a tester-owned MVSep key and
+  a new rights/consent check for every run.
 
 The result is an editable estimate. Check uncertain notes against the recording.
 

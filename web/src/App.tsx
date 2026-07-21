@@ -154,10 +154,7 @@ function App() {
         setTrack(preferences?.track ?? 'original')
         setSpeed(preferences?.speed ?? 1)
         setLoop(preferences?.loop ?? false)
-        setDraftScope(
-          preferences?.draftScope ??
-            (initial.duration_s <= 600 ? 'whole' : 'passage'),
-        )
+        setDraftScope(preferences?.draftScope ?? 'whole')
         window.localStorage.setItem(LAST_PROJECT_KEY, initial.id)
       }
     } catch (loadError) {
@@ -355,12 +352,9 @@ function App() {
   const selectedEnd = draftScope === 'whole' ? project?.duration_s ?? 0 : passage?.end_s ?? 0
   const selectedDuration = Math.max(0, selectedEnd - selectedStart)
   const cloudReady = capabilities?.cloudReady ?? false
-  const maximumDraftDuration =
-    draftEngine === 'mvsep'
-      ? capabilities?.separation.maxDurationS ?? 600
-      : capabilities?.separation.previewMaxDurationS ?? 180
+  const mvsepMaximumDuration = capabilities?.separation.mvsepMaxDurationS ?? 600
   const selectionTooLong =
-    selectedDuration > maximumDraftDuration
+    draftEngine === 'mvsep' && selectedDuration > mvsepMaximumDuration
   const processing = ['queued', 'running'].includes(project?.run.state ?? '')
   const activeVersion = project?.versions.find(
     (version) => version.id === project.active_version_id,
@@ -610,10 +604,7 @@ function App() {
       setTrack(preferences?.track ?? 'original')
       setSpeed(preferences?.speed ?? 1)
       setLoop(preferences?.loop ?? false)
-      setDraftScope(
-        preferences?.draftScope ??
-          (next.duration_s <= 600 ? 'whole' : 'passage'),
-      )
+      setDraftScope(preferences?.draftScope ?? 'whole')
       setCurrentTime(0)
       setSelectedNoteId(null)
       setUndoDelete(null)
@@ -829,7 +820,7 @@ function App() {
       adoptProject(imported)
       setTrack('original')
       setCurrentTime(0)
-      setDraftScope(imported.duration_s <= 180 ? 'whole' : 'passage')
+      setDraftScope('whole')
       setDraftEngine('preview')
       setCloudConsent(false)
       setNotice(`${imported.title} restored from bundle`)
@@ -889,12 +880,12 @@ function App() {
           if (workspaceError instanceof ApiError && workspaceError.status === 409) {
             const fresh = await api.getProject(project.id)
             adoptProject(fresh)
-            setError('A newer edit won. Reloaded latest marked passage.')
+            setError('A newer edit won. Reloaded latest selected section.')
           } else {
             setError(
               workspaceError instanceof Error
                 ? workspaceError.message
-                : 'Could not save marked passage',
+                : 'Could not save selected section',
             )
           }
         })
@@ -1469,43 +1460,39 @@ function App() {
               duration={project.duration_s}
               peaks={project.waveform_peaks}
               passage={passage}
+              selectionEnabled={draftScope === 'passage'}
               onPassageChange={updatePassage}
               onSeek={seek}
             />
             <div className="draft-action-row">
               <div className="draft-scope">
-                <div className="draft-scope-switcher" role="group" aria-label="Lead range">
-                  <button
-                    type="button"
-                    className={draftScope === 'whole' ? 'active' : ''}
-                    aria-pressed={draftScope === 'whole'}
-                    disabled={
-                      project.duration_s > maximumDraftDuration
+                <label className="section-toggle">
+                  <input
+                    type="checkbox"
+                    checked={draftScope === 'passage'}
+                    onChange={(event) =>
+                      setDraftScope(event.target.checked ? 'passage' : 'whole')
                     }
-                    onClick={() => setDraftScope('whole')}
-                  >
-                    Whole lead
-                  </button>
-                  <button
-                    type="button"
-                    className={draftScope === 'passage' ? 'active' : ''}
-                    aria-pressed={draftScope === 'passage'}
-                    onClick={() => setDraftScope('passage')}
-                  >
-                    Marked passage
-                  </button>
-                </div>
-                <div className="draft-range">
+                  />
                   <span>
-                    {formatTime(selectedStart)}–{formatTime(selectedEnd)}
+                    <strong>Limit to a section</strong>
+                    <small>Optional · full song is transcribed by default</small>
                   </span>
-                  <small>
-                    {selectedDuration.toFixed(1)} seconds
-                    {selectionTooLong
-                      ? ` · maximum ${Math.floor(maximumDraftDuration / 60)} minutes`
-                      : ''}
-                  </small>
-                </div>
+                </label>
+                {draftScope === 'passage' && (
+                  <div className="draft-range">
+                    <span>
+                      {formatTime(selectedStart)}–{formatTime(selectedEnd)}
+                    </span>
+                    <small>{selectedDuration.toFixed(1)} seconds selected</small>
+                  </div>
+                )}
+                {selectionTooLong && (
+                  <p className="range-warning" role="status">
+                    MVSep supports up to {Math.floor(mvsepMaximumDuration / 60)} minutes.
+                    Select a section or use Offline preview.
+                  </p>
+                )}
               </div>
               <div className="draft-submit">
                 <div
@@ -1541,7 +1528,7 @@ function App() {
                       checked={cloudConsent}
                       onChange={(event) => setCloudConsent(event.target.checked)}
                     />
-                    <span>I have rights to this audio. Send selected range to MVSep.</span>
+                    <span>I have rights to this audio. Send chosen range to MVSep.</span>
                   </label>
                 )}
                 <button
@@ -1555,13 +1542,13 @@ function App() {
                   onClick={() => void createDraft()}
                 >
                   <Icon name="spark" />
-                  {project.tab.notes.length
-                    ? draftScope === 'whole'
-                      ? 'Create new full draft'
-                      : 'Create new passage draft'
-                    : draftScope === 'whole'
-                      ? 'Create full lead'
-                      : 'Create passage'}
+                  {draftScope === 'whole'
+                    ? project.tab.notes.length
+                      ? 'Transcribe full song again'
+                      : 'Transcribe full song'
+                    : project.tab.notes.length
+                      ? 'Transcribe selected section again'
+                      : 'Transcribe selected section'}
                 </button>
               </div>
             </div>
@@ -1617,7 +1604,7 @@ function App() {
           adoptProject(next)
           setTrack('original')
           setCurrentTime(0)
-          setDraftScope(next.duration_s <= 600 ? 'whole' : 'passage')
+          setDraftScope('whole')
           setCloudConsent(false)
           return next
         }}

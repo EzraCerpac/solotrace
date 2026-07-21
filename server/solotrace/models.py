@@ -140,14 +140,14 @@ class MediaAsset(StrictModel):
 
 
 class Passage(StrictModel):
-    name: str = "Solo 1"
+    name: str = "Full song"
     start_s: float = Field(ge=0)
     end_s: float = Field(gt=0)
 
     @model_validator(mode="after")
     def validate_range(self) -> Passage:
         if self.end_s <= self.start_s:
-            raise ValueError("solo end must be after its start")
+            raise ValueError("range end must be after its start")
         return self
 
 
@@ -222,9 +222,7 @@ class Project(StrictModel):
 
     @property
     def active_version(self) -> TabVersion:
-        return next(
-            version for version in self.versions if version.id == self.active_version_id
-        )
+        return next(version for version in self.versions if version.id == self.active_version_id)
 
     @property
     def tab(self) -> TabDocument:
@@ -305,11 +303,9 @@ class ProcessRequest(StrictModel):
     @model_validator(mode="after")
     def validate_range(self) -> ProcessRequest:
         if self.end_s <= self.start_s:
-            raise ValueError("passage end must be after its start")
-        maximum = 600 if self.engine == "mvsep" else 180
-        if self.end_s - self.start_s > maximum:
-            minutes = maximum // 60
-            raise ValueError(f"Selected passage must be no longer than {minutes} minutes")
+            raise ValueError("selected range end must be after its start")
+        if self.engine == "mvsep" and self.end_s - self.start_s > 600:
+            raise ValueError("MVSep selections must be no longer than 10 minutes")
         if self.engine == "mvsep" and not self.cloud_consent:
             raise ValueError("Confirm MVSep cloud processing before creating this draft")
         if max(self.tuning) + self.fret_count > 127:

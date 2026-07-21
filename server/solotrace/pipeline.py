@@ -8,7 +8,12 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .audio import AudioProcessingError, create_preview_stems, transcribe_pyin
+from .audio import (
+    AudioProcessingCancelled,
+    AudioProcessingError,
+    create_preview_stems,
+    transcribe_pyin,
+)
 from .config import Settings
 from .enhanced import transcribe_basic_pitch
 from .models import (
@@ -82,10 +87,10 @@ class Pipeline:
 
     def _interrupt(self, project_id: str, run_id: str) -> None:
         def update(project: Project) -> Project:
-            if (
-                project.run.id != run_id
-                or project.run.state not in {RunState.queued, RunState.running}
-            ):
+            if project.run.id != run_id or project.run.state not in {
+                RunState.queued,
+                RunState.running,
+            }:
                 return project
             stages = [
                 stage.model_copy(
@@ -137,17 +142,13 @@ class Pipeline:
         if project is None:
             raise KeyError(project_id)
         if end_s > project.duration_s + 0.01:
-            raise ValueError("solo end exceeds the song duration")
+            raise ValueError("Selected range exceeds the song duration")
         if project.revision != expected_revision:
             raise RevisionConflictError(
-                f"Expected revision {expected_revision}, current revision is "
-                f"{project.revision}"
+                f"Expected revision {expected_revision}, current revision is {project.revision}"
             )
-        maximum = 600 if engine == "mvsep" else 180
-        if end_s - start_s > maximum:
-            raise ValueError(
-                f"Selected passage must be no longer than {maximum // 60} minutes"
-            )
+        if engine == "mvsep" and end_s - start_s > 600:
+            raise ValueError("MVSep selections must be no longer than 10 minutes")
         if engine == "mvsep" and not cloud_consent:
             raise ValueError("Confirm MVSep cloud processing before creating this draft")
         if engine == "mvsep" and not self.settings.cloud_pipeline_available:
@@ -206,9 +207,6 @@ class Pipeline:
             project_id,
             run_id,
             message="Cancelling draft",
-            stage_id="separate",
-            stage_state=StageState.running,
-            detail="Stopping MVSep job",
         )
         project = self.store.get(project_id)
         if project is None:
@@ -352,16 +350,28 @@ class Pipeline:
                     )
                     separation_detail = "MVSep one-stage lead/rhythm model · lossless WAV"
                 else:
+
+                    def preview_progress(detail: str) -> None:
+                        self._set_run(
+                            project_id,
+                            run_id,
+                            stage_id="separate",
+                            stage_state=StageState.running,
+                            message="Listening for the guitar",
+                            detail=detail,
+                        )
+
                     sample_rate, duration = create_preview_stems(
                         original,
                         temporary_lead,
                         temporary_backing,
                         start_s,
                         end_s,
+                        progress=preview_progress,
+                        cancelled=cancellation.is_set,
                     )
                     separation_detail = (
-                        "Fast local preview; guitar may share frequencies with "
-                        "other instruments"
+                        "Fast local preview; guitar may share frequencies with other instruments"
                     )
                 self._set_run(
                     project_id,
@@ -393,6 +403,17 @@ class Pipeline:
                         self.settings.basic_pitch_worker,
                     )
                 else:
+
+                    def transcription_progress(detail: str) -> None:
+                        self._set_run(
+                            project_id,
+                            run_id,
+                            stage_id="hear",
+                            stage_state=StageState.running,
+                            message="Hearing notes",
+                            detail=detail,
+                        )
+
                     tab = transcribe_pyin(
                         temporary_lead,
                         start_s,
@@ -400,6 +421,8 @@ class Pipeline:
                         tuning,
                         fret_count,
                         rhythm_path=original,
+                        progress=transcription_progress,
+                        cancelled=cancellation.is_set,
                     )
                 self._set_run(
                     project_id,
@@ -507,7 +530,11 @@ class Pipeline:
                     update={
                         "assets": assets,
                         "passage": Passage(
-                            name=project.passage.name,
+                            name=(
+                                "Full song"
+                                if start_s <= 0.01 and end_s >= duration - 0.01
+                                else "Selected section"
+                            ),
                             start_s=start_s,
                             end_s=end_s,
                         ),
@@ -518,7 +545,7 @@ class Pipeline:
                         "provenance": (
                             [
                                 "Audio decoded locally with FFmpeg.",
-                                "Selected audio sent to MVSep's Germany region with "
+                                "Chosen audio range sent to MVSep's Germany region with "
                                 "explicit consent.",
                                 "MVSep one-stage Lead/Rhythm model estimated foreground "
                                 "lead guitar; lossless 16-bit WAV returned.",
@@ -565,7 +592,7 @@ class Pipeline:
                     "when you are ready."
                 ),
             )
-        except MVSepCancelled:
+        except (AudioProcessingCancelled, MVSepCancelled):
             self._set_run(
                 project_id,
                 run_id,

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from solotrace.api import app
 from solotrace.demo import DEMO_ID
 from solotrace.fingering import legal_fingerings
+from solotrace.models import ProcessRequest
 
 
 def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatch) -> None:
@@ -21,6 +23,8 @@ def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatc
         capabilities = client.get("/api/capabilities").json()
         assert capabilities["cloudReady"] is False
         assert capabilities["separation"]["available"]["mvsep"] is False
+        assert capabilities["separation"]["mvsepMaxDurationS"] == 600
+        assert "previewMaxDurationS" not in capabilities["separation"]
 
         response = client.get(f"/api/projects/{DEMO_ID}")
         assert response.status_code == 200
@@ -35,6 +39,20 @@ def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatc
         media = client.get(f"/media/{DEMO_ID}/backing.wav", headers={"Range": "bytes=0-31"})
         assert media.status_code == 206
         assert len(media.content) == 32
+
+
+def test_offline_process_range_has_no_draft_cap_but_mvsep_keeps_service_limit() -> None:
+    offline = ProcessRequest(start_s=0, end_s=1_200, expected_revision=1)
+    assert offline.end_s == 1_200
+
+    with pytest.raises(ValueError, match="MVSep selections must be no longer than 10 minutes"):
+        ProcessRequest(
+            start_s=0,
+            end_s=601,
+            expected_revision=1,
+            engine="mvsep",
+            cloud_consent=True,
+        )
 
 
 def test_mvsep_token_endpoint_stores_secret_without_returning_it(

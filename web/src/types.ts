@@ -124,8 +124,7 @@ export interface Capabilities {
       mvsep: boolean
     }
     notice: string
-    maxDurationS: number
-    previewMaxDurationS: number
+    mvsepMaxDurationS: number
     consentRequired: boolean
   }
   transcription: {

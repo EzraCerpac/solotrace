@@ -13,6 +13,7 @@ interface WaveformProps {
   duration: number
   peaks: number[]
   passage: Passage
+  selectionEnabled: boolean
   onPassageChange: (passage: Passage) => void
   onSeek: (seconds: number) => void
 }
@@ -24,6 +25,7 @@ export function Waveform({
   duration,
   peaks,
   passage,
+  selectionEnabled,
   onPassageChange,
   onSeek,
 }: WaveformProps) {
@@ -79,12 +81,13 @@ export function Waveform({
       duration,
     })
 
-    let soloRegion: ReturnType<typeof regions.addRegion> | undefined
+    let sectionRegion: ReturnType<typeof regions.addRegion> | undefined
     const unsubscribeReady = wavesurfer.on('ready', () => {
       audio.currentTime = Math.min(currentTimeRef.current, duration)
+      if (!selectionEnabled) return
       const current = passageRef.current
-      soloRegion = regions.addRegion({
-        id: 'solo-passage',
+      sectionRegion = regions.addRegion({
+        id: 'transcription-section',
         start: Math.max(0, current.start_s),
         end: Math.min(duration, current.end_s),
         color: 'rgba(23, 108, 102, 0.16)',
@@ -92,13 +95,13 @@ export function Waveform({
         resize: true,
         minLength: 0.2,
       })
-      regionRef.current = soloRegion
+      regionRef.current = sectionRegion
     })
     const unsubscribeInteraction = wavesurfer.on('interaction', (seconds) => {
       onSeek(seconds)
     })
     const unsubscribeRegion = regions.on('region-updated', (region) => {
-      if (region.id !== 'solo-passage') return
+      if (region.id !== 'transcription-section') return
       onPassageChange({
         ...passageRef.current,
         start_s: region.start,
@@ -110,54 +113,56 @@ export function Waveform({
       unsubscribeReady()
       unsubscribeInteraction()
       unsubscribeRegion()
-      soloRegion?.remove()
+      sectionRegion?.remove()
       regionRef.current = null
       wavesurfer.destroy()
     }
-  }, [audio, audioUrl, duration, onPassageChange, onSeek])
+  }, [audio, audioUrl, duration, onPassageChange, onSeek, selectionEnabled])
 
   return (
     <section className="waveform-panel" aria-label="Song waveform">
       <div className="waveform-ruler" aria-hidden="true">
         <span>{formatTime(0)}</span>
-        <span>Drag edges to mark solo</span>
+        <span>{selectionEnabled ? 'Drag edges to select section' : 'Full song'}</span>
         <span>{formatTime(duration)}</span>
       </div>
       <div className="waveform" ref={containerRef} data-testid="waveform" />
-      <div className="passage-fields">
-        <label>
-          Solo starts
-          <input
-            type="number"
-            min="0"
-            max={passage.end_s - 0.1}
-            step="0.05"
-            value={passage.start_s.toFixed(2)}
-            onChange={(event) =>
-              onPassageChange({
-                ...passage,
-                start_s: Number(event.target.value),
-              })
-            }
-          />
-        </label>
-        <label>
-          Solo ends
-          <input
-            type="number"
-            min={passage.start_s + 0.1}
-            max={duration}
-            step="0.05"
-            value={passage.end_s.toFixed(2)}
-            onChange={(event) =>
-              onPassageChange({
-                ...passage,
-                end_s: Number(event.target.value),
-              })
-            }
-          />
-        </label>
-      </div>
+      {selectionEnabled && (
+        <div className="passage-fields">
+          <label>
+            Section starts
+            <input
+              type="number"
+              min="0"
+              max={passage.end_s - 0.1}
+              step="0.05"
+              value={passage.start_s.toFixed(2)}
+              onChange={(event) =>
+                onPassageChange({
+                  ...passage,
+                  start_s: Number(event.target.value),
+                })
+              }
+            />
+          </label>
+          <label>
+            Section ends
+            <input
+              type="number"
+              min={passage.start_s + 0.1}
+              max={duration}
+              step="0.05"
+              value={passage.end_s.toFixed(2)}
+              onChange={(event) =>
+                onPassageChange({
+                  ...passage,
+                  end_s: Number(event.target.value),
+                })
+              }
+            />
+          </label>
+        </div>
+      )}
     </section>
   )
 }

@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SoloTrace",
     version=APP_VERSION,
-    description="Local-first synchronized guitar solo tab studio",
+    description="Local-first synchronized guitar tab studio",
     lifespan=lifespan,
     docs_url=None if PACKAGED else "/docs",
     redoc_url=None if PACKAGED else "/redoc",
@@ -132,9 +132,7 @@ async def protect_local_mutations(request: Request, call_next):
     if request.url.path.startswith(("/api", "/media")):
         session_secret = getattr(request.app.state, "session_secret", None)
         session = request.cookies.get("solotrace_session")
-        if session_secret and (
-            session is None or not hmac.compare_digest(session, session_secret)
-        ):
+        if session_secret and (session is None or not hmac.compare_digest(session, session_secret)):
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("origin")
@@ -155,8 +153,10 @@ async def protect_local_mutations(request: Request, call_next):
                     status_code=400,
                     content={"detail": "Invalid Content-Length header."},
                 )
-            if settings is not None and upload_size is not None and (
-                upload_size > settings.max_upload_bytes + 1024 * 1024
+            if (
+                settings is not None
+                and upload_size is not None
+                and (upload_size > settings.max_upload_bytes + 1024 * 1024)
             ):
                 return JSONResponse(
                     status_code=413,
@@ -219,8 +219,7 @@ def _version_summary(version: TabVersion) -> TabVersionSummary:
         updated_at=version.updated_at,
         note_count=len(version.tab.notes),
         needs_review_count=sum(
-            not note.reviewed and note.confidence.minimum < 0.72
-            for note in version.tab.notes
+            not note.reviewed and note.confidence.minimum < 0.72 for note in version.tab.notes
         ),
     )
 
@@ -309,11 +308,10 @@ def capabilities(request: Request) -> dict[str, object]:
                 "mvsep": cloud,
             },
             "notice": (
-                "Experimental MVSep lead estimate uploads only the selected range "
+                "Experimental MVSep lead estimate uploads only the chosen range "
                 "to MVSep's Germany region after per-run consent."
             ),
-            "maxDurationS": 600,
-            "previewMaxDurationS": 180,
+            "mvsepMaxDurationS": 600,
             "consentRequired": True,
         },
         "transcription": {
@@ -329,7 +327,7 @@ def capabilities(request: Request) -> dict[str, object]:
             "ready": cloud,
         },
         "privacy": (
-            "Imports stay local. Creating a cloud lead draft sends only the selected "
+            "Imports stay local. Creating a cloud lead draft sends only the chosen "
             "audio to MVSep after explicit consent."
         ),
     }
@@ -380,15 +378,8 @@ def get_project(project_id: str, request: Request) -> ProjectView:
 
 
 def _slug(value: str) -> str:
-    ascii_value = (
-        unicodedata.normalize("NFKD", value)
-        .encode("ascii", "ignore")
-        .decode("ascii")
-    )
-    slug = "".join(
-        character.lower() if character.isalnum() else "-"
-        for character in ascii_value
-    )
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    slug = "".join(character.lower() if character.isalnum() else "-" for character in ascii_value)
     slug = "-".join(filter(None, slug.split("-")))
     return slug[:36] or "solo"
 
@@ -398,9 +389,7 @@ def _ensure_decode_space(path: Path, data_dir: Path) -> None:
     decoded_bytes = int(duration * 44_100 * 2 * 2)
     required = decoded_bytes * 3 + 64 * 1024 * 1024
     if shutil.disk_usage(data_dir).free < required:
-        raise AudioProcessingError(
-            "Not enough free disk space to import this audio safely"
-        )
+        raise AudioProcessingError("Not enough free disk space to import this audio safely")
 
 
 @app.post("/api/projects", response_model=ProjectView, status_code=201)
@@ -458,13 +447,13 @@ async def create_project(
             await file.close()
 
     initial_end = min(duration, max(4.0, duration))
-    run = new_run().model_copy(update={"state": RunState.idle, "message": "Mark the solo"})
+    run = new_run().model_copy(update={"state": RunState.idle, "message": "Ready to transcribe"})
     project = Project(
         id=project_id,
         title=title.strip(),
         artist=artist.strip(),
         duration_s=duration,
-        passage=Passage(name="Solo 1", start_s=0, end_s=initial_end),
+        passage=Passage(name="Full song", start_s=0, end_s=initial_end),
         assets=[
             MediaAsset(
                 role="original",
@@ -673,7 +662,7 @@ def patch_workspace(
         project = _store(request).update(
             project_id,
             lambda current: current.model_copy(update={"passage": body.passage}),
-            reason="update marked passage",
+            reason="update selected section",
             expected_revision=body.expected_revision,
             bump_revision=True,
         )
@@ -691,10 +680,7 @@ def _create_version(project: Project, body: VersionCreateRequest) -> Project:
     mode = body.mode
     notes = source.tab.notes
     if mode is not None:
-        unlocked = [
-            note.model_copy(update={"user_locked": False})
-            for note in source.tab.notes
-        ]
+        unlocked = [note.model_copy(update={"user_locked": False}) for note in source.tab.notes]
         arranged = assign_fingerings(
             unlocked,
             source.tab.tuning,
@@ -850,13 +836,9 @@ def delete_version(
             raise ValueError("Keep at least one tab version")
         versions = [version for version in project.versions if version.id != version_id]
         active_id = (
-            versions[0].id
-            if project.active_version_id == version_id
-            else project.active_version_id
+            versions[0].id if project.active_version_id == version_id else project.active_version_id
         )
-        return project.model_copy(
-            update={"versions": versions, "active_version_id": active_id}
-        )
+        return project.model_copy(update={"versions": versions, "active_version_id": active_id})
 
     try:
         project = _store(request).update(
@@ -1024,9 +1006,7 @@ def media(project_id: str, filename: str, request: Request) -> FileResponse:
 
 @app.get("/{path:path}", include_in_schema=False)
 def frontend(path: str, request: Request) -> FileResponse:
-    if path == "api" or path.startswith("api/") or path == "media" or path.startswith(
-        "media/"
-    ):
+    if path == "api" or path.startswith("api/") or path == "media" or path.startswith("media/"):
         raise HTTPException(status_code=404, detail="Route not found")
     web_dist = _settings(request).web_dist
     candidate = web_dist / path

@@ -118,8 +118,8 @@ export function UploadDialog({
           </label>
         </div>
         <p className="privacy-note">
-          Import stays on this machine. Creating a lead draft later sends only your
-          selected range to MVSep after you confirm.
+          Import stays on this machine. Offline transcription stays local. Choosing
+          MVSep later sends only your chosen range after you confirm.
         </p>
         {error && (
           <p className="form-error" role="alert">

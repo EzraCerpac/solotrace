@@ -107,9 +107,7 @@ class MVSepApi:
                             "MVSep returned an invalid download size"
                         ) from error
                     if declared_size > _MAX_DOWNLOAD_BYTES:
-                        raise AudioProcessingError(
-                            "MVSep lead stem is unexpectedly large"
-                        )
+                        raise AudioProcessingError("MVSep lead stem is unexpectedly large")
                 with output_path.open("wb") as output:
                     for chunk in response.iter_bytes():
                         if cancelled():
@@ -134,10 +132,11 @@ class MVSepApi:
         for file in files:
             if not isinstance(file, dict):
                 continue
-            name = " ".join(
-                str(file.get(field, ""))
-                for field in ("type", "name", "download")
-            ).lower().replace("_", "-")
+            name = (
+                " ".join(str(file.get(field, "")) for field in ("type", "name", "download"))
+                .lower()
+                .replace("_", "-")
+            )
             url = file.get("url")
             if "lead-guitar" in name and isinstance(url, str):
                 return url
@@ -261,7 +260,7 @@ def create_mvsep_stems(
     start = max(0, round(start_s * sample_rate))
     end = min(info.frames, round(end_s * sample_rate))
     if end - start < sample_rate // 5:
-        raise AudioProcessingError("Selected passage is too short")
+        raise AudioProcessingError("Selected range is too short")
 
     passage_path = workspace / "mvsep-input.wav"
     with sf.SoundFile(original_path) as source:

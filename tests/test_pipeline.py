@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import shutil
+import threading
 import time
 
 import soundfile as sf
+from solotrace.audio import AudioProcessingCancelled
 from solotrace.config import Settings
 from solotrace.demo import DEMO_ID, ensure_demo
 from solotrace.models import RunState, StageState, TabDocument
@@ -22,9 +24,7 @@ def test_startup_terminalizes_orphaned_processing_run(tmp_path) -> None:
                 stage.model_copy(
                     update={
                         "status": (
-                            StageState.running
-                            if stage.id == "separate"
-                            else StageState.pending
+                            StageState.running if stage.id == "separate" else StageState.pending
                         )
                     }
                 )
@@ -52,6 +52,42 @@ def test_startup_terminalizes_orphaned_processing_run(tmp_path) -> None:
     )
 
 
+def test_offline_pipeline_cancels_during_chunked_processing(tmp_path, monkeypatch) -> None:
+    store = ProjectStore(tmp_path)
+    project = ensure_demo(store)
+    entered = threading.Event()
+
+    def wait_for_cancellation(*_args, cancelled, **_kwargs):
+        entered.set()
+        while not cancelled():
+            time.sleep(0.005)
+        raise AudioProcessingCancelled("Draft cancelled")
+
+    monkeypatch.setattr("solotrace.pipeline.create_preview_stems", wait_for_cancellation)
+    pipeline = Pipeline(store)
+    pipeline.start(
+        DEMO_ID,
+        start_s=0,
+        end_s=project.duration_s,
+        tuning=project.tab.tuning,
+        fret_count=project.tab.fret_count,
+        expected_revision=project.revision,
+    )
+    assert entered.wait(timeout=1)
+    pipeline.cancel(DEMO_ID)
+
+    deadline = time.monotonic() + 2
+    cancelled = store.get(DEMO_ID)
+    while cancelled is not None and cancelled.run.state in {RunState.queued, RunState.running}:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+        cancelled = store.get(DEMO_ID)
+    pipeline.close()
+
+    assert cancelled is not None
+    assert cancelled.run.state == RunState.cancelled
+
+
 def test_mvsep_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> None:
     store = ProjectStore(tmp_path / "data")
     project = ensure_demo(store)
@@ -77,7 +113,7 @@ def test_mvsep_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> None
         info = sf.info(original)
         return info.samplerate, info.duration
 
-    def fake_transcription(*_args) -> TabDocument:
+    def fake_transcription(*_args, **_kwargs) -> TabDocument:
         return project.tab
 
     monkeypatch.setattr("solotrace.pipeline.create_mvsep_stems", fake_stems)

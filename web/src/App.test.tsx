@@ -35,8 +35,7 @@ beforeEach(() => {
       selected: 'preview',
       available: { preview: true, mvsep: false },
       notice: '',
-      maxDurationS: 600,
-      previewMaxDurationS: 180,
+      mvsepMaxDurationS: 600,
       consentRequired: true,
     },
     transcription: {
@@ -60,10 +59,69 @@ beforeEach(() => {
       throw new Error('unsupported')
     }),
   })
+  window.localStorage?.clear()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+test('defaults a song longer than three minutes to full transcription', async () => {
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Late Solo' })
+
+  const sectionToggle = screen.getByRole('checkbox', {
+    name: /Limit to a section/,
+  })
+  expect(sectionToggle).not.toBeChecked()
+  expect(screen.queryByLabelText('Section starts')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Transcribe full song again' })).toBeEnabled()
+
+  fireEvent.click(sectionToggle)
+
+  expect(sectionToggle).toBeChecked()
+  expect(screen.getByLabelText('Section starts')).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: 'Transcribe selected section again' }),
+  ).toBeEnabled()
+})
+
+test('explains the MVSep service limit without limiting offline transcription', async () => {
+  const longProject = { ...project, title: 'Long Song', duration_s: 700 }
+  apiMock.listProjects.mockResolvedValue([longProject])
+  apiMock.getProject.mockResolvedValue(longProject)
+  apiMock.capabilities.mockResolvedValue({
+    appVersion: '0.1.0',
+    buildId: 'test',
+    packaged: false,
+    audio: { ffmpeg: true, maxUploadMb: 250 },
+    separation: {
+      selected: 'mvsep',
+      available: { preview: true, mvsep: true },
+      notice: '',
+      mvsepMaxDurationS: 600,
+      consentRequired: true,
+    },
+    transcription: {
+      selected: 'basicPitch',
+      available: { pyin: true, basicPitch: true },
+    },
+    cloudReady: true,
+    cloud: { configured: true, ready: true },
+    privacy: 'local',
+  })
+
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Long Song' })
+  fireEvent.click(screen.getByRole('button', { name: 'Experimental MVSep' }))
+
+  expect(
+    screen.getByText('MVSep supports up to 10 minutes. Select a section or use Offline preview.'),
+  ).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Transcribe full song again' })).toBeDisabled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Offline preview' }))
+  expect(screen.getByRole('button', { name: 'Transcribe full song again' })).toBeEnabled()
 })
 
 test('Play mode removes editing controls and keeps seeking, tracks, and keyboard playback', async () => {

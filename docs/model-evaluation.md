@@ -35,7 +35,7 @@ The first run downloads a 52 MB converted weight file on the tested machine.
 The isolated worker environments use about 1.7 GB. The six outputs are drums,
 bass, other, vocals, guitar, and piano. This is **all guitar**, not reliably the
 solo guitar. SoloTrace subtracts that estimate from the original only inside the
-marked passage. This keeps original and backing sample-aligned, but missed guitar
+chosen range. This keeps original and backing sample-aligned, but missed guitar
 remains audible.
 
 MLX needs access to the Apple Metal device. A sandboxed or headless macOS process

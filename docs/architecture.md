@@ -25,7 +25,7 @@ separately on each note. Refingering preserves review state when a note stays on
 the same string/fret and reopens it when that position moves.
 
 All mutations include one project-wide revision token; stale updates fail with
-`409`. SQLite persists projects, versions, reviews, marked passages, and
+`409`. SQLite persists projects, versions, reviews, selected sections, and
 recoverable Trash state. Browser local storage only remembers workspace
 preferences; playback position and note selection reset on reopen.
 

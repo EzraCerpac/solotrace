@@ -138,7 +138,9 @@ export function TabEditor({
       {project.tab.notes.length === 0 ? (
         <div className="tab-empty">
           <p>No notes yet.</p>
-          <span>Mark the solo above, then create a draft. Waveform editing stays available.</span>
+          <span>
+            Transcribe the full song, or optionally limit it to a section above.
+          </span>
         </div>
       ) : (
         <div

@@ -21,7 +21,7 @@ def normalize_edited_notes(
             or note.audio_offset_s > project.passage.end_s
             or note.audio_offset_s > project.duration_s
         ):
-            raise ValueError("Notes must stay inside the marked solo")
+            raise ValueError("Notes must stay inside the transcription range")
 
         onset_frame = round(note.audio_onset_s * project.tab.sample_rate)
         end_frame = max(
@@ -42,9 +42,7 @@ def normalize_edited_notes(
             project.tab.fret_count,
         )
         if not alternatives:
-            raise ValueError(
-                f"{note.midi_pitch} is outside this guitar's tuning and fret range"
-            )
+            raise ValueError(f"{note.midi_pitch} is outside this guitar's tuning and fret range")
         chosen = next(
             (
                 alternative
@@ -57,8 +55,7 @@ def normalize_edited_notes(
             chosen = min(
                 alternatives,
                 key=lambda alternative: (
-                    abs(alternative.fret - note.fret)
-                    + abs(alternative.string - note.string),
+                    abs(alternative.fret - note.fret) + abs(alternative.string - note.string),
                     alternative.fret,
                 ),
             )
