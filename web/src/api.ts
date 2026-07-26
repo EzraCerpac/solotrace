@@ -3,6 +3,7 @@ import type {
   DraftEngine,
   FingeringMode,
   NoteEvent,
+  Passage,
   Project,
   ProjectSummary,
 } from './types'
@@ -21,8 +22,31 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = `Request failed (${response.status})`
     try {
-      const payload = (await response.json()) as { detail?: string }
-      message = payload.detail ?? message
+      const payload = (await response.json()) as {
+        detail?:
+          | string
+          | Array<{
+              loc?: Array<string | number>
+              msg?: string
+              type?: string
+            }>
+      }
+
+      if (typeof payload.detail === 'string') {
+        message = payload.detail
+      } else if (Array.isArray(payload.detail)) {
+        message = payload.detail
+          .map((error) => {
+            const location = error.loc
+              ?.filter((part) => part !== 'body')
+              .join('.')
+
+            return location
+              ? `${location}: ${error.msg ?? 'Invalid value'}`
+              : error.msg ?? 'Invalid request'
+          })
+          .join('; ')
+      }
     } catch {
       // Keep status-based fallback when a proxy or server returns non-JSON.
     }
@@ -69,7 +93,7 @@ export const api = {
 
   processProject: (
     projectId: string,
-    passage: { start_s: number; end_s: number },
+    passage: Pick<Passage, 'start_s' | 'end_s'>,
     tuning: number[],
     fretCount: number,
     expectedRevision: number,
@@ -80,7 +104,8 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ...passage,
+        start_s: passage.start_s,
+        end_s: passage.end_s,
         tuning,
         fret_count: fretCount,
         expected_revision: expectedRevision,
