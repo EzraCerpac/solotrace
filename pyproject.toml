@@ -30,7 +30,7 @@ desktop = [
   "coremltools==9.0; sys_platform == 'darwin'",
   "pyinstaller>=6.21,<7; sys_platform == 'darwin'",
   "pywebview>=6.1,<7; sys_platform == 'darwin'",
-  "setuptools==80.9.0",
+  "setuptools==83.0.0",
 ]
 
 [project.scripts]
