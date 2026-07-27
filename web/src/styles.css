@@ -1958,6 +1958,21 @@ li[data-status='complete'] .stage-dot {
   cursor: pointer;
 }
 
+.play-chord-symbol {
+  fill: var(--ink);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 17px;
+  font-weight: 650;
+  paint-order: stroke;
+  stroke: var(--chalk);
+  stroke-linejoin: round;
+  stroke-width: 5px;
+}
+
+.play-chord-symbol.active {
+  fill: var(--ocean);
+}
+
 .tab-string {
   stroke: color-mix(in srgb, var(--ink) 58%, transparent);
   stroke-width: 1;

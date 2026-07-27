@@ -9,7 +9,6 @@ import {
   type PlayTabSystem,
 } from '../tab-layout'
 import type { Project } from '../types'
-import { HarmonyLane } from './HarmonyLane'
 import { RhythmicTabStaff } from './RhythmicTabStaff'
 
 interface PlayTabProps {
@@ -232,33 +231,16 @@ export function PlayTab({ project, currentTime, playing, onSeek }: PlayTabProps)
               aria-label={`Tab ${system.measures[0].number} through ${system.measures.at(-1)!.number}`}
             >
               <div className="play-system-scroll">
-                <div className="tab-timeline" style={{ width: system.width }}>
-                  <HarmonyLane
-                    width={system.width}
-                    side={PLAY_SIDE}
-                    passageStart={system.start_s}
-                    passageEnd={system.end_s}
-                    tempoBpm={project.tab.tempo_bpm}
-                    beatType={project.tab.time_signature[1]}
-                    chords={project.tab.chords.events}
-                    currentTime={currentTime}
-                    selectedChordId={null}
-                    editable={false}
-                    disabled={false}
-                    onSelect={(chord) => onSeek(chord.audio_onset_s)}
-                    onBoundaryMove={() => undefined}
-                    onAddAtPlayhead={() => undefined}
-                  />
-                  <RhythmicTabStaff
-                    system={system}
-                    labels={labels}
-                    currentTime={currentTime}
-                    playheadX={playheadX}
-                    onSeek={onSeek}
-                    timeSignature={project.tab.time_signature}
-                    ticksPerQuarter={project.tab.ticks_per_quarter}
-                  />
-                </div>
+                <RhythmicTabStaff
+                  system={system}
+                  labels={labels}
+                  chords={project.tab.chords.events}
+                  currentTime={currentTime}
+                  playheadX={playheadX}
+                  onSeek={onSeek}
+                  timeSignature={project.tab.time_signature}
+                  ticksPerQuarter={project.tab.ticks_per_quarter}
+                />
               </div>
             </section>
           )

@@ -1,8 +1,9 @@
 import { useState, type KeyboardEvent } from 'react'
 
+import { formatChordSymbol } from '@solotrace/editor'
 import { pitchName } from '../music'
 import type { PlayTabSystem, RestValue } from '../tab-layout'
-import type { NoteEvent } from '../types'
+import type { ChordEvent, NoteEvent } from '../types'
 
 const TOP = 54
 const STRING_GAP = 18
@@ -74,6 +75,7 @@ function xForTime(system: PlayTabSystem, seconds: number): number {
 export function RhythmicTabStaff({
   system,
   labels,
+  chords,
   playheadX,
   currentTime,
   onSeek,
@@ -82,6 +84,7 @@ export function RhythmicTabStaff({
 }: {
   system: PlayTabSystem
   labels: string[]
+  chords: ChordEvent[]
   playheadX: number | null
   currentTime: number
   onSeek: (seconds: number) => void
@@ -89,6 +92,16 @@ export function RhythmicTabStaff({
   ticksPerQuarter: number
 }) {
   const notes = system.measures.flatMap((measure) => measure.notes)
+  const visibleChords = chords
+    .filter(
+      (chord) =>
+        chord.audio_offset_s > system.start_s &&
+        chord.audio_onset_s < system.end_s,
+    )
+    .map((chord) => ({
+      chord,
+      x: xForTime(system, Math.max(chord.audio_onset_s, system.start_s)),
+    }))
   const [focusIndex, setFocusIndex] = useState(0)
   const height = 188
   const beamed = notes
@@ -137,6 +150,21 @@ export function RhythmicTabStaff({
       }}
     >
       <text className="tab-mark" x="12" y="28">TAB</text>
+      {visibleChords.map(({ chord, x }) => {
+        const active =
+          currentTime >= chord.audio_onset_s &&
+          currentTime < chord.audio_offset_s
+        return (
+          <text
+            key={chord.id}
+            className={`play-chord-symbol ${active ? 'active' : ''}`}
+            x={x + 7}
+            y="35"
+          >
+            {formatChordSymbol(chord)}
+          </text>
+        )
+      })}
       {labels.map((label, index) => {
         const y = TOP + index * STRING_GAP
         return (
@@ -153,7 +181,7 @@ export function RhythmicTabStaff({
       {system.measures.map((measure, index) => (
         <g key={measure.number}>
           <line className="barline" x1={measure.x} x2={measure.x} y1={TOP - 8} y2={STAFF_BOTTOM + 8} />
-          <text className="bar-number" x={measure.x + 6} y="25">{measure.number}</text>
+          <text className="bar-number" x={measure.x + 6} y="15">{measure.number}</text>
           {index === system.measures.length - 1 && (
             <line className="barline" x1={measure.x + measure.width} x2={measure.x + measure.width} y1={TOP - 8} y2={STAFF_BOTTOM + 8} />
           )}
