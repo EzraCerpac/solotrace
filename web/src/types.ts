@@ -7,6 +7,8 @@ import type {
 
 export type {
   AssetRole,
+  ChordEvent,
+  ChordTrack,
   Confidence,
   Fingering,
   FingeringMode,
@@ -52,6 +54,8 @@ export interface TabVersionSummary {
   updated_at: string
   note_count: number
   needs_review_count: number
+  chord_count: number
+  chord_needs_review_count: number
 }
 
 export interface ProjectSummary {
@@ -68,6 +72,8 @@ export interface ProjectSummary {
   active_version_name: string
   note_count: number
   needs_review_count: number
+  chord_count: number
+  chord_needs_review_count: number
 }
 
 export interface PipelineStage {
@@ -133,6 +139,14 @@ export interface Capabilities {
       pyin: boolean
       basicPitch: boolean
     }
+  }
+  chords: {
+    available: boolean
+    engine: string
+    modelRevision: string
+    modelSha256: string
+    detail: string
+    desktopOnly: boolean
   }
   cloudReady: boolean
   cloud: {

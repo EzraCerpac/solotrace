@@ -1045,6 +1045,126 @@ li[data-status='complete'] .stage-dot {
   scrollbar-width: thin;
 }
 
+.tab-timeline {
+  position: relative;
+}
+
+.harmony-lane {
+  position: relative;
+  height: 86px;
+  border-bottom: 1px solid var(--nickel);
+  background: color-mix(in srgb, var(--iris-soft), transparent 38%);
+  touch-action: pan-x;
+}
+
+.harmony-label {
+  position: absolute;
+  top: 10px;
+  left: 18px;
+  color: var(--ink-soft);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+}
+
+.harmony-chord {
+  position: absolute;
+  top: 25px;
+  height: 47px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3px 9px;
+  border: 1px solid var(--nickel);
+  border-radius: 4px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.harmony-chord.needs-review {
+  border-color: var(--oxide);
+  border-style: dashed;
+  background: var(--oxide-soft);
+}
+
+.harmony-chord.reviewed {
+  border-color: var(--iris);
+}
+
+.harmony-chord.selected,
+.harmony-chord.playing {
+  border-color: var(--ocean);
+  background: var(--ocean-soft);
+  box-shadow: inset 0 -3px 0 var(--ocean);
+}
+
+.harmony-chord strong {
+  font-family: 'League Gothic', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.harmony-chord small {
+  color: var(--ink-soft);
+  font-size: 0.57rem;
+  white-space: nowrap;
+}
+
+.harmony-boundary {
+  position: absolute;
+  z-index: 2;
+  top: 20px;
+  width: 18px;
+  height: 58px;
+  margin-left: -9px;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.harmony-boundary::after {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 8px;
+  width: 2px;
+  background: var(--ink-soft);
+  content: '';
+}
+
+.harmony-playhead {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  pointer-events: none;
+  background: var(--oxide);
+}
+
+.harmony-empty-action,
+.harmony-empty-label {
+  position: absolute;
+  top: 27px;
+  left: 64px;
+}
+
+.harmony-empty-action {
+  min-height: 39px;
+  border: 1px dashed var(--iris);
+  border-radius: 4px;
+  background: var(--iris-soft);
+  cursor: pointer;
+}
+
+.harmony-empty-label {
+  color: var(--ink-soft);
+}
+
 .tab-svg {
   display: block;
   touch-action: pan-x;
@@ -1394,6 +1514,9 @@ li[data-status='complete'] .stage-dot {
 }
 
 .note-inspector input[type='number'],
+.note-inspector input:not([type]),
+.note-inspector input[type='text'],
+.note-inspector select,
 .dialog-fields input,
 .token-dialog input {
   width: 100%;
@@ -1404,6 +1527,36 @@ li[data-status='complete'] .stage-dot {
   background: var(--paper);
   color: var(--ink);
   font-family: 'IBM Plex Mono', monospace;
+}
+
+.chord-alternatives button {
+  flex-direction: column;
+}
+
+.model-score {
+  margin: 0;
+  color: var(--ink-soft);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+}
+
+.inspector-button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.inspector-button-grid button {
+  min-height: 39px;
+  border: 1px solid var(--nickel);
+  border-radius: 4px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.chord-history-button {
+  min-width: auto;
+  padding-inline: 9px;
 }
 
 .token-dialog {

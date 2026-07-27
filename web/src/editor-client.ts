@@ -25,6 +25,7 @@ export const DESKTOP_EDITOR_CAPABILITIES = Object.freeze({
   saveCopies: false,
   uploads: true,
   processing: true,
+  chordRecognition: true,
   projectBundles: true,
   maxSavedCopies: 0,
   maxDocumentBytes: 0,
@@ -191,6 +192,16 @@ export class DesktopEditorClient implements EditorClientAdapter {
           action.versionId,
           expectedRevision,
           action.notes,
+        ),
+      )
+    }
+    if (action.type === 'replace-chords') {
+      return toEditorProject(
+        await api.patchChords(
+          projectId,
+          action.versionId,
+          expectedRevision,
+          action.track,
         ),
       )
     }

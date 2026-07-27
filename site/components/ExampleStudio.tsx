@@ -2,8 +2,12 @@
 
 import {
   activeVersion,
+  applyVersionAction as applyEditorVersionAction,
+  formatChordSymbol,
   fingeringPreservesConnectedTechniques,
   isEditorProject,
+  type ChordEvent,
+  type ChordTrack,
   type EditorProject,
   type ExportFormat,
   type FingeringMode,
@@ -24,6 +28,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
+import { HostedChordInspector } from "./HostedChordInspector";
 
 type StemRole = "original" | "lead" | "backing";
 
@@ -197,13 +202,17 @@ export function TabCanvas({
   project,
   currentTime,
   selectedNoteId,
+  selectedChordId = null,
   onSelect,
+  onSelectChord = () => undefined,
   disabled = false,
 }: {
   project: ExampleProject;
   currentTime: number;
   selectedNoteId: string | null;
+  selectedChordId?: string | null;
   onSelect: (note: NoteEvent) => void;
+  onSelectChord?: (chord: ChordEvent) => void;
   disabled?: boolean;
 }) {
   const version = activeVersion(project);
@@ -223,14 +232,51 @@ export function TabCanvas({
 
   return (
     <div className="example-studio__tab-scroll">
-      <svg
+      <div className="example-studio__timeline" style={{ width }}>
+        <div className="example-studio__harmony" aria-label="Harmony lane">
+          <span>CHORDS</span>
+          {version.tab.chords.events.map((chord) => {
+            const left =
+              startX +
+              (chord.audio_onset_s / Math.max(project.duration_s, 0.01)) * usableWidth;
+            const right =
+              startX +
+              (chord.audio_offset_s / Math.max(project.duration_s, 0.01)) * usableWidth;
+            const selected = chord.id === selectedChordId;
+            const playing =
+              currentTime >= chord.audio_onset_s && currentTime < chord.audio_offset_s;
+            return (
+              <button
+                type="button"
+                key={chord.id}
+                className={[
+                  "example-studio__chord",
+                  selected ? "is-selected" : "",
+                  playing ? "is-playing" : "",
+                  chord.reviewed ? "is-reviewed" : "needs-review",
+                ].join(" ")}
+                style={{ left, width: Math.max(28, right - left) }}
+                disabled={disabled}
+                onClick={() => onSelectChord(chord)}
+              >
+                {formatChordSymbol(chord)}
+              </button>
+            );
+          })}
+          <i
+            className="example-studio__harmony-playhead"
+            style={{ left: playheadX }}
+            aria-hidden="true"
+          />
+        </div>
+        <svg
         className="example-studio__tab"
         viewBox={`0 0 ${width} ${height}`}
         width={width}
         height={height}
         role="group"
         aria-label={`Editable tablature for ${project.title}. Each fret is an interactive note.`}
-      >
+        >
         <title>{`Editable tablature for ${project.title}`}</title>
         <desc>
           Select a fret number to inspect or change its fingering. Technique marks
@@ -309,7 +355,8 @@ export function TabCanvas({
             </g>
           );
         })}
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -323,6 +370,7 @@ export function ExampleStudio({ slug }: ExampleStudioProps) {
   const [project, setProject] = useState<ExampleProject | null>(null);
   const [peaks, setPeaks] = useState<number[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [selectedChordId, setSelectedChordId] = useState<string | null>(null);
   const [stem, setStem] = useState<StemRole>("original");
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
@@ -440,6 +488,10 @@ export function ExampleStudio({ slug }: ExampleStudioProps) {
     () => version?.tab.notes.find((note) => note.id === selectedNoteId) ?? null,
     [selectedNoteId, version],
   );
+  const selectedChord = useMemo(
+    () => version?.tab.chords.events.find((chord) => chord.id === selectedChordId) ?? null,
+    [selectedChordId, version],
+  );
   const selectedNoteIndex = useMemo(
     () => version?.tab.notes.findIndex((note) => note.id === selectedNoteId) ?? -1,
     [selectedNoteId, version],
@@ -491,8 +543,28 @@ export function ExampleStudio({ slug }: ExampleStudioProps) {
   };
 
   const selectNote = (note: NoteEvent) => {
+    setSelectedChordId(null);
     setSelectedNoteId(note.id);
     seek(note.audio_onset_s);
+  };
+
+  const replaceChords = (track: ChordTrack, nextMessage: string) => {
+    if (!project) return;
+    if (track === version?.tab.chords) {
+      setMessage(nextMessage);
+      return;
+    }
+    const next = applyEditorVersionAction(
+      project,
+      {
+        type: "replace-chords",
+        versionId: project.active_version_id,
+        track,
+      },
+      new Date().toISOString(),
+    );
+    setProject(next);
+    setMessage(nextMessage);
   };
 
   const mutateSelected = (update: (note: NoteEvent) => NoteEvent) => {
@@ -854,7 +926,13 @@ export function ExampleStudio({ slug }: ExampleStudioProps) {
           project={project}
           currentTime={currentTime}
           selectedNoteId={selectedNoteId}
+          selectedChordId={selectedChordId}
           onSelect={selectNote}
+          onSelectChord={(chord) => {
+            setSelectedNoteId(null);
+            setSelectedChordId(chord.id);
+            seek(chord.audio_onset_s);
+          }}
         />
 
         <div className="example-studio__edit-grid">
@@ -886,8 +964,18 @@ export function ExampleStudio({ slug }: ExampleStudioProps) {
           </aside>
 
           <aside className="example-studio__inspector" aria-labelledby="inspector-heading">
-            <h3 id="inspector-heading">Selected note</h3>
-            {selectedNote ? (
+            <h3 id="inspector-heading">{selectedChord ? "Selected chord" : "Selected note"}</h3>
+            {selectedChord ? (
+              <HostedChordInspector
+                key={selectedChord.id}
+                chord={selectedChord}
+                track={version.tab.chords}
+                tab={version.tab}
+                currentTime={currentTime}
+                disabled={false}
+                onChange={replaceChords}
+              />
+            ) : selectedNote ? (
               <>
                 <dl className="example-studio__note-facts">
                   <div><dt>Pitch</dt><dd>MIDI {selectedNote.midi_pitch}</dd></div>

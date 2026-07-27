@@ -1,10 +1,15 @@
 import type {
+  ChordAlternative,
+  ChordEvent,
+  ChordQuality,
+  ChordTrack,
   EditorProject,
   Fingering,
   FingeringMode,
   NoteEvent,
   TabVersion,
 } from './types'
+import { emptyChordTrack } from './chords'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -20,6 +25,121 @@ function isInteger(value: unknown): value is number {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+const CHORD_QUALITIES = new Set<ChordQuality>([
+  'min',
+  'maj',
+  'dim',
+  'aug',
+  'min6',
+  'maj6',
+  'min7',
+  'minmaj7',
+  'maj7',
+  '7',
+  'dim7',
+  'hdim7',
+  'sus2',
+  'sus4',
+])
+
+function isSpelledPitch(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    ['A', 'B', 'C', 'D', 'E', 'F', 'G'].includes(String(value.step)) &&
+    isInteger(value.alter) &&
+    value.alter >= -2 &&
+    value.alter <= 2
+  )
+}
+
+function hasValidChordSymbol(value: Record<string, unknown>): boolean {
+  if (value.kind === 'chord') {
+    return isSpelledPitch(value.root) && CHORD_QUALITIES.has(value.quality as ChordQuality)
+  }
+  return (
+    ['no-chord', 'unknown'].includes(String(value.kind)) &&
+    value.root === null &&
+    value.quality === null
+  )
+}
+
+function isChordAlternative(value: unknown): value is ChordAlternative {
+  return (
+    isRecord(value) &&
+    hasValidChordSymbol(value) &&
+    isFiniteNumber(value.model_score) &&
+    value.model_score >= 0 &&
+    value.model_score <= 1
+  )
+}
+
+function isChordEvent(value: unknown): value is ChordEvent {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    value.id.length > 0 &&
+    isInteger(value.onset_frame) &&
+    value.onset_frame >= 0 &&
+    isInteger(value.end_frame) &&
+    value.end_frame > value.onset_frame &&
+    isFiniteNumber(value.audio_onset_s) &&
+    value.audio_onset_s >= 0 &&
+    isFiniteNumber(value.audio_offset_s) &&
+    value.audio_offset_s > value.audio_onset_s &&
+    isInteger(value.score_tick) &&
+    value.score_tick >= 0 &&
+    isInteger(value.duration_ticks) &&
+    value.duration_ticks > 0 &&
+    hasValidChordSymbol(value) &&
+    (value.bass === null || (value.kind === 'chord' && isSpelledPitch(value.bass))) &&
+    (value.model_score === null ||
+      (isFiniteNumber(value.model_score) &&
+        value.model_score >= 0 &&
+        value.model_score <= 1)) &&
+    Array.isArray(value.alternatives) &&
+    value.alternatives.length <= 3 &&
+    value.alternatives.every(isChordAlternative) &&
+    ['detected', 'manual', 'example'].includes(String(value.provenance)) &&
+    typeof value.edited === 'boolean' &&
+    typeof value.reviewed === 'boolean'
+  )
+}
+
+function isChordTrack(value: unknown): value is ChordTrack {
+  if (!isRecord(value) || typeof value.engine !== 'string' || !value.engine) return false
+  const start = value.analyzed_start_s
+  const end = value.analyzed_end_s
+  if (
+    (start === null) !== (end === null) ||
+    (start !== null && (!isFiniteNumber(start) || start < 0)) ||
+    (end !== null && (!isFiniteNumber(end) || end <= 0)) ||
+    (isFiniteNumber(start) && isFiniteNumber(end) && end <= start) ||
+    (value.model_revision !== null && typeof value.model_revision !== 'string') ||
+    (value.model_sha256 !== null &&
+      (typeof value.model_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.model_sha256))) ||
+    !Array.isArray(value.events) ||
+    !value.events.every(isChordEvent)
+  ) {
+    return false
+  }
+  const events = value.events
+  if (new Set(events.map((event) => event.id)).size !== events.length) return false
+  if (!events.length) return true
+  if (
+    !isFiniteNumber(start) ||
+    !isFiniteNumber(end) ||
+    Math.abs(events[0].audio_onset_s - start) > 0.0001 ||
+    Math.abs(events.at(-1)!.audio_offset_s - end) > 0.0001
+  ) {
+    return false
+  }
+  return events.every(
+    (event, index) =>
+      index === 0 ||
+      Math.abs(events[index - 1].audio_offset_s - event.audio_onset_s) <= 0.0001,
+  )
 }
 
 function isFingering(value: unknown, stringCount: number, fretCount: number): value is Fingering {
@@ -93,6 +213,7 @@ function isNote(
 function isVersion(value: unknown): value is TabVersion {
   if (!isRecord(value) || !isRecord(value.tab)) return false
   const tab = value.tab
+  if (tab.chords === undefined) tab.chords = emptyChordTrack()
   const timeSignature = tab.time_signature
   const tuning = tab.tuning
   const fretCount = tab.fret_count
@@ -132,7 +253,8 @@ function isVersion(value: unknown): value is TabVersion {
     ) ||
     !Array.isArray(tab.notes) ||
     tab.notes.length === 0 ||
-    !tab.notes.every((note) => isNote(note, tuning, fretCount))
+    !tab.notes.every((note) => isNote(note, tuning, fretCount)) ||
+    !isChordTrack(tab.chords)
   ) {
     return false
   }

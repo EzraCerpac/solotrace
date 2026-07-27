@@ -55,6 +55,225 @@
       "name": "Balanced",
       "source": "deterministic example",
       "tab": {
+        "chords": {
+          "analyzed_end_s": 17.2,
+          "analyzed_start_s": 0.7,
+          "engine": "deterministic example progression",
+          "events": [
+            {
+              "alternatives": [],
+              "audio_offset_s": 1.875,
+              "audio_onset_s": 0.7,
+              "bass": null,
+              "duration_ticks": 902,
+              "edited": false,
+              "end_frame": 41344,
+              "id": "low-orbit-chord-01",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 15435,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 538
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 3.75,
+              "audio_onset_s": 1.875,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 82688,
+              "id": "low-orbit-chord-02",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 41344,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 1440
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 5.625,
+              "audio_onset_s": 3.75,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 124031,
+              "id": "low-orbit-chord-03",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 82688,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "A"
+              },
+              "score_tick": 2880
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 7.5,
+              "audio_onset_s": 5.625,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 165375,
+              "id": "low-orbit-chord-04",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 124031,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 4320
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 9.375,
+              "audio_onset_s": 7.5,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 206719,
+              "id": "low-orbit-chord-05",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 165375,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "F"
+              },
+              "score_tick": 5760
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 11.25,
+              "audio_onset_s": 9.375,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 248062,
+              "id": "low-orbit-chord-06",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 206719,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 7200
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 13.125,
+              "audio_onset_s": 11.25,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 289406,
+              "id": "low-orbit-chord-07",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 248062,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 8640
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 15.0,
+              "audio_onset_s": 13.125,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 330750,
+              "id": "low-orbit-chord-08",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 289406,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 10080
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 16.875,
+              "audio_onset_s": 15.0,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 372094,
+              "id": "low-orbit-chord-09",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 330750,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 11520
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 17.2,
+              "audio_onset_s": 16.875,
+              "bass": null,
+              "duration_ticks": 250,
+              "edited": false,
+              "end_frame": 379260,
+              "id": "low-orbit-chord-10",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 372094,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 12960
+            }
+          ],
+          "model_revision": null,
+          "model_sha256": null
+        },
         "fret_count": 22,
         "notes": [
           {
@@ -1321,6 +1540,225 @@
       "name": "Easiest",
       "source": "deterministic example",
       "tab": {
+        "chords": {
+          "analyzed_end_s": 17.2,
+          "analyzed_start_s": 0.7,
+          "engine": "deterministic example progression",
+          "events": [
+            {
+              "alternatives": [],
+              "audio_offset_s": 1.875,
+              "audio_onset_s": 0.7,
+              "bass": null,
+              "duration_ticks": 902,
+              "edited": false,
+              "end_frame": 41344,
+              "id": "low-orbit-chord-01",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 15435,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 538
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 3.75,
+              "audio_onset_s": 1.875,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 82688,
+              "id": "low-orbit-chord-02",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 41344,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 1440
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 5.625,
+              "audio_onset_s": 3.75,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 124031,
+              "id": "low-orbit-chord-03",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 82688,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "A"
+              },
+              "score_tick": 2880
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 7.5,
+              "audio_onset_s": 5.625,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 165375,
+              "id": "low-orbit-chord-04",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 124031,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 4320
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 9.375,
+              "audio_onset_s": 7.5,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 206719,
+              "id": "low-orbit-chord-05",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 165375,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "F"
+              },
+              "score_tick": 5760
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 11.25,
+              "audio_onset_s": 9.375,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 248062,
+              "id": "low-orbit-chord-06",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 206719,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 7200
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 13.125,
+              "audio_onset_s": 11.25,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 289406,
+              "id": "low-orbit-chord-07",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 248062,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 8640
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 15.0,
+              "audio_onset_s": 13.125,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 330750,
+              "id": "low-orbit-chord-08",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 289406,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 10080
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 16.875,
+              "audio_onset_s": 15.0,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 372094,
+              "id": "low-orbit-chord-09",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 330750,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 11520
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 17.2,
+              "audio_onset_s": 16.875,
+              "bass": null,
+              "duration_ticks": 250,
+              "edited": false,
+              "end_frame": 379260,
+              "id": "low-orbit-chord-10",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 372094,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 12960
+            }
+          ],
+          "model_revision": null,
+          "model_sha256": null
+        },
         "fret_count": 22,
         "notes": [
           {
@@ -2587,6 +3025,225 @@
       "name": "One Position",
       "source": "deterministic example",
       "tab": {
+        "chords": {
+          "analyzed_end_s": 17.2,
+          "analyzed_start_s": 0.7,
+          "engine": "deterministic example progression",
+          "events": [
+            {
+              "alternatives": [],
+              "audio_offset_s": 1.875,
+              "audio_onset_s": 0.7,
+              "bass": null,
+              "duration_ticks": 902,
+              "edited": false,
+              "end_frame": 41344,
+              "id": "low-orbit-chord-01",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 15435,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 538
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 3.75,
+              "audio_onset_s": 1.875,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 82688,
+              "id": "low-orbit-chord-02",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 41344,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 1440
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 5.625,
+              "audio_onset_s": 3.75,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 124031,
+              "id": "low-orbit-chord-03",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 82688,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "A"
+              },
+              "score_tick": 2880
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 7.5,
+              "audio_onset_s": 5.625,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 165375,
+              "id": "low-orbit-chord-04",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 124031,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 4320
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 9.375,
+              "audio_onset_s": 7.5,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 206719,
+              "id": "low-orbit-chord-05",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 165375,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "F"
+              },
+              "score_tick": 5760
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 11.25,
+              "audio_onset_s": 9.375,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 248062,
+              "id": "low-orbit-chord-06",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 206719,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 7200
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 13.125,
+              "audio_onset_s": 11.25,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 289406,
+              "id": "low-orbit-chord-07",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 248062,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 8640
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 15.0,
+              "audio_onset_s": 13.125,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 330750,
+              "id": "low-orbit-chord-08",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 289406,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 10080
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 16.875,
+              "audio_onset_s": 15.0,
+              "bass": null,
+              "duration_ticks": 1440,
+              "edited": false,
+              "end_frame": 372094,
+              "id": "low-orbit-chord-09",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 330750,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 11520
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 17.2,
+              "audio_onset_s": 16.875,
+              "bass": null,
+              "duration_ticks": 250,
+              "edited": false,
+              "end_frame": 379260,
+              "id": "low-orbit-chord-10",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 372094,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 12960
+            }
+          ],
+          "model_revision": null,
+          "model_sha256": null
+        },
         "fret_count": 22,
         "notes": [
           {

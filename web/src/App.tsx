@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  deleteChordToUnknown,
+  emptyChordTrack,
+  mergeChord,
+  moveChordBoundary,
+  normalizeChordTrack,
+  replaceChordSymbol,
+  setChordReviewed,
+  splitChord,
+} from '@solotrace/editor'
 import { api, ApiError } from './api'
 import { desktopEditorClient, toDesktopProject } from './editor-client'
 import { Icon } from './components/Icon'
 import { MVSepDialog } from './components/MVSepDialog'
+import { ChordInspector } from './components/ChordInspector'
 import { NoteInspector } from './components/NoteInspector'
 import { PipelineStrip } from './components/PipelineStrip'
 import { ProjectDialog } from './components/ProjectDialog'
@@ -17,6 +28,8 @@ import { formatTime, minimumConfidence, pitchName } from './music'
 import type {
   AssetRole,
   Capabilities,
+  ChordEvent,
+  ChordTrack,
   DraftEngine,
   DraftScope,
   Fingering,
@@ -60,6 +73,10 @@ function summaryFromProject(project: Project): ProjectSummary {
     active_version_name: active?.name ?? 'Tab',
     note_count: active?.note_count ?? project.tab.notes.length,
     needs_review_count: active?.needs_review_count ?? 0,
+    chord_count: active?.chord_count ?? project.tab.chords.events.length,
+    chord_needs_review_count:
+      active?.chord_needs_review_count ??
+      project.tab.chords.events.filter((chord) => !chord.reviewed).length,
   }
 }
 
@@ -104,6 +121,7 @@ function App() {
   const [loop, setLoop] = useState(false)
   const [passage, setPassage] = useState<Passage | null>(null)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
+  const [selectedChordId, setSelectedChordId] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [mvsepOpen, setMvsepOpen] = useState(false)
   const [versionOpen, setVersionOpen] = useState(false)
@@ -121,6 +139,8 @@ function App() {
   } | null>(null)
   const [viewMode, setViewMode] = useState<'edit' | 'play'>('edit')
   const [fullscreen, setFullscreen] = useState(false)
+  const [chordUndo, setChordUndo] = useState<ChordTrack[]>([])
+  const [chordRedo, setChordRedo] = useState<ChordTrack[]>([])
 
   const loadInitial = useCallback(async () => {
     setLoading(true)
@@ -167,6 +187,13 @@ function App() {
   useEffect(() => {
     void loadInitial()
   }, [loadInitial])
+
+  useEffect(() => {
+    setSelectedNoteId(null)
+    setSelectedChordId(null)
+    setChordUndo([])
+    setChordRedo([])
+  }, [project?.active_version_id, project?.id])
 
   useEffect(() => {
     const query = window.matchMedia('(max-width: 820px)')
@@ -339,6 +366,10 @@ function App() {
 
   const selectedNote =
     project?.tab.notes.find((note) => note.id === selectedNoteId) ?? null
+  const selectedChord =
+    project?.tab.chords.events.find((chord) => chord.id === selectedChordId) ?? null
+  const selectedChordIndex =
+    project?.tab.chords.events.findIndex((chord) => chord.id === selectedChordId) ?? -1
   const uncertainNotes = useMemo(
     () =>
       project?.tab.notes
@@ -347,6 +378,24 @@ function App() {
         )
         .sort((left, right) => left.audio_onset_s - right.audio_onset_s) ?? [],
     [project],
+  )
+  const reviewItems = useMemo(
+    () =>
+      [
+        ...uncertainNotes.map((note) => ({
+          id: note.id,
+          kind: 'note' as const,
+          time: note.audio_onset_s,
+        })),
+        ...(project?.tab.chords.events
+          .filter((chord) => !chord.reviewed)
+          .map((chord) => ({
+            id: chord.id,
+            kind: 'chord' as const,
+            time: chord.audio_onset_s,
+          })) ?? []),
+      ].sort((left, right) => left.time - right.time),
+    [project, uncertainNotes],
   )
   const selectedStart = draftScope === 'whole' ? 0 : passage?.start_s ?? 0
   const selectedEnd = draftScope === 'whole' ? project?.duration_s ?? 0 : passage?.end_s ?? 0
@@ -436,6 +485,249 @@ function App() {
       setSaving(false)
     }
   }
+
+  const saveChords = async (
+    track: ChordTrack,
+    message: string,
+    recordHistory = true,
+  ): Promise<Project | null> => {
+    if (viewMode !== 'edit' || !project || savingRef.current) return null
+    const previous = project
+    const normalized = normalizeChordTrack(track, project.tab)
+    savingRef.current = true
+    setSaving(true)
+    setError('')
+    setProject({ ...project, tab: { ...project.tab, chords: normalized } })
+    try {
+      const updated = toDesktopProject(
+        await desktopEditorClient.applyVersionAction({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          action: {
+            type: 'replace-chords',
+            versionId: project.active_version_id,
+            track: normalized,
+          },
+        }),
+      )
+      adoptProject(updated, false)
+      if (recordHistory) {
+        setChordUndo((history) => [...history, previous.tab.chords].slice(-100))
+        setChordRedo([])
+      }
+      setNotice(message)
+      return updated
+    } catch (saveError) {
+      if (saveError instanceof ApiError && saveError.status === 409) {
+        const fresh = await loadDesktopProject(project.id)
+        adoptProject(fresh)
+        setSelectedChordId(null)
+        setChordUndo([])
+        setChordRedo([])
+        setError('A newer edit won. Chord history was cleared and the latest version reloaded.')
+      } else {
+        setProject((current) => (current?.id === previous.id ? previous : current))
+        setError(saveError instanceof Error ? saveError.message : 'Could not save chords')
+      }
+      return null
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  const selectReviewItem = (item: (typeof reviewItems)[number] | undefined) => {
+    if (!item) return
+    if (item.kind === 'note') {
+      setSelectedChordId(null)
+      setSelectedNoteId(item.id)
+    } else {
+      setSelectedNoteId(null)
+      setSelectedChordId(item.id)
+    }
+    seek(item.time)
+  }
+
+  const selectNextReviewAt = (time: number) => {
+    const next = reviewItems.find((item) => item.time > time + 0.0001) ?? reviewItems[0]
+    selectReviewItem(next)
+  }
+
+  const moveBoundary = (leftChordId: string, seconds: number) => {
+    if (!project) return
+    try {
+      const track = normalizeChordTrack(
+        moveChordBoundary(project.tab.chords, leftChordId, seconds),
+        project.tab,
+      )
+      void saveChords(track, 'Chord boundary moved')
+    } catch (boundaryError) {
+      setError(boundaryError instanceof Error ? boundaryError.message : 'Could not move boundary')
+    }
+  }
+
+  const addChordAtPlayhead = () => {
+    if (!project) return
+    const id = `chord-${crypto.randomUUID()}`
+    let track = project.tab.chords
+    try {
+      if (!track.events.length) {
+        const start = project.passage.start_s
+        const end = project.passage.end_s
+        const event: ChordEvent = {
+          id,
+          onset_frame: 0,
+          end_frame: 1,
+          audio_onset_s: start,
+          audio_offset_s: end,
+          score_tick: 0,
+          duration_ticks: 1,
+          kind: 'unknown',
+          root: null,
+          quality: null,
+          bass: null,
+          model_score: null,
+          alternatives: [],
+          provenance: 'manual',
+          edited: true,
+          reviewed: false,
+        }
+        track = {
+          ...emptyChordTrack(),
+          analyzed_start_s: start,
+          analyzed_end_s: end,
+          events: [event],
+        }
+      } else {
+        const target =
+          track.events.find(
+            (chord) =>
+              currentTime > chord.audio_onset_s && currentTime < chord.audio_offset_s,
+          ) ??
+          track.events.find((chord) => chord.id === selectedChordId)
+        if (!target) throw new Error('Move the playhead inside a chord span first')
+        track = splitChord(track, target.id, currentTime, id)
+        track = deleteChordToUnknown(track, id)
+      }
+      track = normalizeChordTrack(track, project.tab)
+      void saveChords(track, 'Chord inserted').then((updated) => {
+        if (updated) {
+          setSelectedNoteId(null)
+          setSelectedChordId(id)
+        }
+      })
+    } catch (insertError) {
+      setError(insertError instanceof Error ? insertError.message : 'Could not insert chord')
+    }
+  }
+
+  const saveSelectedChord = (symbol: string, start: number, end: number) => {
+    if (!project || !selectedChord) return
+    try {
+      let track = replaceChordSymbol(project.tab.chords, selectedChord.id, symbol)
+      const events = project.tab.chords.events
+      if (selectedChordIndex > 0 && start !== selectedChord.audio_onset_s) {
+        track = moveChordBoundary(track, events[selectedChordIndex - 1].id, start)
+      }
+      if (
+        selectedChordIndex < events.length - 1 &&
+        end !== selectedChord.audio_offset_s
+      ) {
+        track = moveChordBoundary(track, selectedChord.id, end)
+      }
+      const reviewed = setChordReviewed(track, selectedChord.id, true)
+      void saveChords(reviewed, 'Chord changes saved').then((updated) => {
+        if (updated) selectNextReviewAt(selectedChord.audio_onset_s)
+      })
+    } catch (chordError) {
+      setError(chordError instanceof Error ? chordError.message : 'Could not edit chord')
+    }
+  }
+
+  const reviewSelectedChord = (reviewed: boolean) => {
+    if (!project || !selectedChord) return
+    const track = setChordReviewed(project.tab.chords, selectedChord.id, reviewed)
+    void saveChords(track, reviewed ? 'Chord accepted' : 'Chord returned to review').then(
+      (updated) => {
+        if (updated && reviewed) selectNextReviewAt(selectedChord.audio_onset_s)
+      },
+    )
+  }
+
+  const splitSelectedChord = () => {
+    if (!project || !selectedChord) return
+    const id = `chord-${crypto.randomUUID()}`
+    try {
+      const track = splitChord(project.tab.chords, selectedChord.id, currentTime, id)
+      void saveChords(track, 'Chord split').then((updated) => {
+        if (updated) setSelectedChordId(id)
+      })
+    } catch (splitError) {
+      setError(splitError instanceof Error ? splitError.message : 'Could not split chord')
+    }
+  }
+
+  const mergeSelectedChord = (direction: 'left' | 'right') => {
+    if (!project || !selectedChord) return
+    try {
+      const track = mergeChord(project.tab.chords, selectedChord.id, direction)
+      void saveChords(track, `Merged chord ${direction}`)
+    } catch (mergeError) {
+      setError(mergeError instanceof Error ? mergeError.message : 'Could not merge chord')
+    }
+  }
+
+  const deleteSelectedChord = () => {
+    if (!project || !selectedChord) return
+    const track = deleteChordToUnknown(project.tab.chords, selectedChord.id)
+    void saveChords(track, 'Chord changed to unknown')
+  }
+
+  const undoChordEdit = async () => {
+    if (!project || !chordUndo.length || savingRef.current) return
+    const target = chordUndo.at(-1)!
+    const current = project.tab.chords
+    const updated = await saveChords(target, 'Chord edit undone', false)
+    if (updated) {
+      setChordUndo((history) => history.slice(0, -1))
+      setChordRedo((history) => [...history, current].slice(-100))
+    }
+  }
+
+  const redoChordEdit = async () => {
+    if (!project || !chordRedo.length || savingRef.current) return
+    const target = chordRedo.at(-1)!
+    const current = project.tab.chords
+    const updated = await saveChords(target, 'Chord edit redone', false)
+    if (updated) {
+      setChordRedo((history) => history.slice(0, -1))
+      setChordUndo((history) => [...history, current].slice(-100))
+    }
+  }
+
+  useEffect(() => {
+    const handleChordUndo = (event: KeyboardEvent) => {
+      if (
+        !selectedChordId ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.key.toLowerCase() !== 'z'
+      ) {
+        return
+      }
+      const target = event.target
+      if (
+        (target instanceof Element && target.matches('input, textarea, select')) ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      if (event.shiftKey) void redoChordEdit()
+      else void undoChordEdit()
+    }
+    window.addEventListener('keydown', handleChordUndo)
+    return () => window.removeEventListener('keydown', handleChordUndo)
+  })
 
   const changeFingering = (noteId: string, fingering: Fingering) => {
     if (viewMode !== 'edit' || !project || savingRef.current) return
@@ -560,6 +852,35 @@ function App() {
       setError(draftError instanceof Error ? draftError.message : 'Could not create draft')
     } finally {
       if (engine === 'mvsep') setCloudConsent(false)
+    }
+  }
+
+  const createChordDraft = async () => {
+    if (
+      viewMode !== 'edit' ||
+      !project ||
+      processing ||
+      !capabilities?.chords?.available
+    ) {
+      return
+    }
+    setError('')
+    setSelectedNoteId(null)
+    setSelectedChordId(null)
+    setChordUndo([])
+    setChordRedo([])
+    try {
+      const next = await api.analyzeChords(
+        project.id,
+        project.active_version_id,
+        project.revision,
+        project.passage.start_s,
+        project.passage.end_s,
+      )
+      adoptProject(next, false)
+      setNotice('Finding chords in the original mix')
+    } catch (chordError) {
+      setError(chordError instanceof Error ? chordError.message : 'Could not find chords')
     }
   }
 
@@ -1144,7 +1465,10 @@ function App() {
           </button>
           <button
             type="button"
-            disabled={saving || !project.tab.notes.length}
+            disabled={
+              saving ||
+              (!project.tab.notes.length && !project.tab.chords.events.length)
+            }
             aria-pressed="false"
             onClick={enterPlayMode}
           >
@@ -1261,6 +1585,18 @@ function App() {
                 >
                   •••
                 </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  disabled={processing || !capabilities?.chords?.available}
+                  onClick={() => void createChordDraft()}
+                  title={capabilities?.chords?.detail}
+                >
+                  Find chords
+                </button>
+                {!capabilities?.chords?.available && (
+                  <small>Manual chord editing remains available.</small>
+                )}
               </div>
             ))}
           </nav>
@@ -1433,21 +1769,36 @@ function App() {
               <button
                 type="button"
                 className="review-count"
-                disabled={!uncertainNotes.length}
+                disabled={!reviewItems.length}
                 onClick={() => {
-                  const currentIndex = uncertainNotes.findIndex(
-                    (note) => note.id === selectedNoteId,
+                  const selectedId = selectedChordId ?? selectedNoteId
+                  const currentIndex = reviewItems.findIndex(
+                    (item) => item.id === selectedId,
                   )
-                  const next = uncertainNotes[(currentIndex + 1) % uncertainNotes.length]
-                  if (next) {
-                    setSelectedNoteId(next.id)
-                    seek(next.audio_onset_s)
-                  }
+                  selectReviewItem(
+                    reviewItems[(currentIndex + 1) % reviewItems.length],
+                  )
                 }}
               >
-                <span>{uncertainNotes.length}</span>
-                {uncertainNotes.length === 1 ? 'note needs review' : 'notes need review'}
+                <span>{reviewItems.length}</span>
+                {reviewItems.length === 1 ? 'item needs review' : 'items need review'}
                 <Icon name="next" />
+              </button>
+              <button
+                type="button"
+                className="review-count chord-history-button"
+                disabled={!chordUndo.length || saving}
+                onClick={() => void undoChordEdit()}
+              >
+                Undo chord
+              </button>
+              <button
+                type="button"
+                className="review-count chord-history-button"
+                disabled={!chordRedo.length || saving}
+                onClick={() => void redoChordEdit()}
+              >
+                Redo
               </button>
             </div>
           </section>
@@ -1556,9 +1907,20 @@ function App() {
               project={project}
               currentTime={currentTime}
               selectedNoteId={selectedNoteId}
-              onSelectNote={setSelectedNoteId}
+              selectedChordId={selectedChordId}
+              onSelectNote={(noteId) => {
+                setSelectedChordId(null)
+                setSelectedNoteId(noteId)
+              }}
+              onSelectChord={(chord) => {
+                setSelectedNoteId(null)
+                setSelectedChordId(chord.id)
+                seek(chord.audio_onset_s)
+              }}
               onSeek={seek}
               onFingeringChange={changeFingering}
+              onChordBoundaryMove={moveBoundary}
+              onAddChord={addChordAtPlayhead}
               disabled={saving}
             />
           </div>
@@ -1577,6 +1939,25 @@ function App() {
               seek(Math.max(0, note.audio_onset_s - 0.35))
               void audioRef.current?.play()
             }}
+          />
+        )}
+        {selectedChord && (
+          <ChordInspector
+            chord={selectedChord}
+            index={selectedChordIndex}
+            chordCount={project.tab.chords.events.length}
+            saving={saving}
+            onClose={() => setSelectedChordId(null)}
+            onSave={saveSelectedChord}
+            onAccept={() => reviewSelectedChord(true)}
+            onReopen={() => reviewSelectedChord(false)}
+            onAudition={() => {
+              seek(Math.max(0, selectedChord.audio_onset_s - 0.35))
+              void audioRef.current?.play()
+            }}
+            onSplit={splitSelectedChord}
+            onMerge={mergeSelectedChord}
+            onDelete={deleteSelectedChord}
           />
         )}
       </div>

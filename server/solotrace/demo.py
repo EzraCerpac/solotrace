@@ -11,6 +11,8 @@ import numpy as np
 from .audio import waveform_peaks
 from .fingering import FingeringMode, assign_fingerings
 from .models import (
+    ChordEvent,
+    ChordTrack,
     Confidence,
     MediaAsset,
     NoteEvent,
@@ -19,6 +21,7 @@ from .models import (
     ProcessingRun,
     Project,
     RunState,
+    SpelledPitch,
     StageState,
     SyncAnchor,
     TabDocument,
@@ -28,7 +31,7 @@ from .models import (
 from .storage import ProjectStore
 
 DEMO_ID = "northbound-lights-demo"
-DEMO_VERSION = "Demo version 3."
+DEMO_VERSION = "Demo version 4."
 SAMPLE_RATE = 22_050
 TEMPO_BPM = 92.0
 BEAT_SECONDS = 60 / TEMPO_BPM
@@ -403,6 +406,61 @@ def _anchors(spec: ExampleSpec) -> list[SyncAnchor]:
     return anchors
 
 
+def _reviewed_chords(spec: ExampleSpec) -> ChordTrack:
+    names = (
+        ("C", 0),
+        ("C", 1),
+        ("D", 0),
+        ("D", 1),
+        ("E", 0),
+        ("F", 0),
+        ("F", 1),
+        ("G", 0),
+        ("G", 1),
+        ("A", 0),
+        ("A", 1),
+        ("B", 0),
+    )
+    start_s, end_s = spec.passage
+    bar_seconds = spec.bar_quarter_beats * spec.beat_seconds
+    first_bar = math.floor(start_s / bar_seconds)
+    events: list[ChordEvent] = []
+    bar = first_bar
+    cursor = start_s
+    while cursor < end_s - 1e-9:
+        boundary = min(end_s, (bar + 1) * bar_seconds)
+        root_midi = spec.chord_roots[min(bar, len(spec.chord_roots) - 1)]
+        step, alter = names[root_midi % 12]
+        onset_frame = round(cursor * SAMPLE_RATE)
+        end_frame = max(onset_frame + 1, round(boundary * SAMPLE_RATE))
+        score_tick = round(cursor / spec.beat_seconds * 480)
+        end_tick = round(boundary / spec.beat_seconds * 480)
+        events.append(
+            ChordEvent(
+                id=f"{spec.slug}-chord-{bar + 1:02d}",
+                onset_frame=onset_frame,
+                end_frame=end_frame,
+                audio_onset_s=cursor,
+                audio_offset_s=boundary,
+                score_tick=score_tick,
+                duration_ticks=max(1, end_tick - score_tick),
+                kind="chord",
+                root=SpelledPitch(step=step, alter=alter),
+                quality="maj",
+                provenance="example",
+                reviewed=True,
+            )
+        )
+        cursor = boundary
+        bar += 1
+    return ChordTrack(
+        engine="deterministic example progression",
+        analyzed_start_s=start_s,
+        analyzed_end_s=end_s,
+        events=events,
+    )
+
+
 def render_example_project(
     spec: ExampleSpec,
     directory: Path,
@@ -412,6 +470,7 @@ def render_example_project(
     """Render one deterministic example and return its validated project document."""
     raw_notes = _render_example(directory, spec)
     anchors = _anchors(spec)
+    chords = _reviewed_chords(spec)
     versions = []
     for version_spec in spec.versions:
         notes = assign_fingerings(
@@ -435,6 +494,7 @@ def render_example_project(
                     tuning=list(spec.tuning),
                     sync_anchors=anchors,
                     notes=notes,
+                    chords=chords,
                 ),
             )
         )
@@ -454,6 +514,7 @@ def render_example_project(
         PipelineStage(id="hear", label="Hear notes", status=StageState.complete),
         PipelineStage(id="rhythm", label="Match rhythm", status=StageState.complete),
         PipelineStage(id="fingering", label="Choose frets", status=StageState.complete),
+        PipelineStage(id="chords", label="Find chords", status=StageState.complete),
     ]
     return Project(
         id=spec.project_id,
@@ -597,6 +658,16 @@ def ensure_demo(store: ProjectStore) -> Project:
                 "duration_s": project.duration_s,
                 "waveform_peaks": project.waveform_peaks,
                 "provenance": provenance,
+                "versions": [
+                    version.model_copy(
+                        update={
+                            "tab": version.tab.model_copy(
+                                update={"chords": project.tab.chords}
+                            )
+                        }
+                    )
+                    for version in existing.versions
+                ],
             }
         )
         return store.put(refreshed, reason="refresh demo media")

@@ -32,11 +32,15 @@ datas = [
     (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
     (str(ROOT / "PRIVATE_BETA_TERMS.md"), "."),
     (str(ROOT / "CHANGELOG.md"), "."),
+    (
+        str(ROOT / "server" / "solotrace" / "resources" / "chordmini"),
+        "solotrace/resources/chordmini",
+    ),
     (str(BUILD_METADATA), "."),
 ]
 binaries = []
 hiddenimports = ["solotrace.api", "solotrace.basic_pitch_worker", "solotrace.self_test"]
-for package in ("basic_pitch", "coremltools", "keyring", "webview"):
+for package in ("basic_pitch", "coremltools", "keyring", "onnxruntime", "webview"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
     datas.extend(item for item in package_datas if not is_test_artifact(item[1]))
     binaries.extend(item for item in package_binaries if not is_test_artifact(item[1]))
@@ -53,7 +57,7 @@ analysis = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[str(ROOT / "packaging" / "runtime_build.py")],
-    excludes=["demucs", "torch", "tensorflow", "onnxruntime"],
+    excludes=["demucs", "torch", "tensorflow"],
     noarchive=False,
 )
 pyz = PYZ(analysis.pure)

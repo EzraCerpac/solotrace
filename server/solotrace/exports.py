@@ -11,12 +11,12 @@ from xml.etree import ElementTree as ET
 
 import mido
 
-from .models import NoteEvent, Project
+from .models import ChordEvent, NoteEvent, Project
 from .version import APP_VERSION
 
 PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 PROJECT_FORMAT = "solotrace-project"
-PROJECT_SCHEMA_VERSION = 1
+PROJECT_SCHEMA_VERSION = 2
 
 
 def pitch_name(midi_pitch: int) -> str:
@@ -178,6 +178,48 @@ def _append_musicxml_note(measure: ET.Element, segment: _MeasureNote) -> None:
         )
 
 
+def _append_musicxml_harmony(
+    measure: ET.Element,
+    chord: ChordEvent,
+    measure_start: int,
+) -> None:
+    harmony = ET.SubElement(measure, "harmony")
+    if chord.kind == "chord":
+        assert chord.root is not None and chord.quality is not None
+        root = ET.SubElement(harmony, "root")
+        ET.SubElement(root, "root-step").text = chord.root.step
+        if chord.root.alter:
+            ET.SubElement(root, "root-alter").text = str(chord.root.alter)
+        kind_names = {
+            "min": "minor",
+            "maj": "major",
+            "dim": "diminished",
+            "aug": "augmented",
+            "min6": "minor-sixth",
+            "maj6": "major-sixth",
+            "min7": "minor-seventh",
+            "minmaj7": "major-minor",
+            "maj7": "major-seventh",
+            "7": "dominant",
+            "dim7": "diminished-seventh",
+            "hdim7": "half-diminished",
+            "sus2": "suspended-second",
+            "sus4": "suspended-fourth",
+        }
+        ET.SubElement(harmony, "kind").text = kind_names[chord.quality]
+        if chord.bass is not None:
+            bass = ET.SubElement(harmony, "bass")
+            ET.SubElement(bass, "bass-step").text = chord.bass.step
+            if chord.bass.alter:
+                ET.SubElement(bass, "bass-alter").text = str(chord.bass.alter)
+    else:
+        kind = ET.SubElement(harmony, "kind", text="N.C." if chord.kind == "no-chord" else "X")
+        kind.text = "none" if chord.kind == "no-chord" else "other"
+    offset = max(0, chord.score_tick - measure_start)
+    if offset:
+        ET.SubElement(harmony, "offset").text = str(offset)
+
+
 def musicxml(project: Project) -> bytes:
     score = ET.Element("score-partwise", version="4.0")
     work = ET.SubElement(score, "work")
@@ -192,8 +234,16 @@ def musicxml(project: Project) -> bytes:
     grouped: dict[int, list[_MeasureNote]] = {}
     for segment in segments:
         grouped.setdefault(segment.measure_number, []).append(segment)
+    harmonies: dict[int, list[ChordEvent]] = {}
+    for chord in project.tab.chords.events:
+        measure_number = chord.score_tick // ticks_per_measure + 1
+        harmonies.setdefault(measure_number, []).append(chord)
 
-    for measure_number in range(1, max(grouped, default=1) + 1):
+    final_measure = max(
+        max(grouped, default=1),
+        max(harmonies, default=1),
+    )
+    for measure_number in range(1, final_measure + 1):
         measure = ET.SubElement(part, "measure", number=str(measure_number))
         if measure_number == 1:
             attributes = ET.SubElement(measure, "attributes")
@@ -220,7 +270,13 @@ def musicxml(project: Project) -> bytes:
             tempo = f"{project.tab.tempo_bpm:g}"
             ET.SubElement(metronome, "per-minute").text = tempo
             ET.SubElement(direction, "sound", tempo=tempo)
-        cursor = (measure_number - 1) * ticks_per_measure
+        measure_start = (measure_number - 1) * ticks_per_measure
+        for chord in sorted(
+            harmonies.get(measure_number, []),
+            key=lambda event: (event.score_tick, event.id),
+        ):
+            _append_musicxml_harmony(measure, chord, measure_start)
+        cursor = measure_start
         for segment in grouped.get(measure_number, []):
             if segment.start_tick > cursor:
                 forward = ET.SubElement(measure, "forward")

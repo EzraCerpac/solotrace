@@ -1,5 +1,6 @@
 import type {
   Capabilities,
+  ChordTrack,
   DraftEngine,
   FingeringMode,
   NoteEvent,
@@ -181,6 +182,44 @@ export const api = {
         expected_revision: expectedRevision,
         notes,
       }),
+      },
+    ),
+
+  patchChords: (
+    projectId: string,
+    versionId: string,
+    expectedRevision: number,
+    track: ChordTrack,
+  ) =>
+    request<Project>(
+      `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/chords`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          track,
+        }),
+      },
+    ),
+
+  analyzeChords: (
+    projectId: string,
+    versionId: string,
+    expectedRevision: number,
+    startSeconds?: number,
+    endSeconds?: number,
+  ) =>
+    request<Project>(
+      `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/analyze-chords`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          ...(startSeconds === undefined ? {} : { start_s: startSeconds }),
+          ...(endSeconds === undefined ? {} : { end_s: endSeconds }),
+        }),
       },
     ),
 

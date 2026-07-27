@@ -274,7 +274,7 @@ def test_active_exports_choose_one_version_and_bundle_keeps_all(
         assert exported_json.status_code == 200
         manifest = json.loads(exported_json.content)
         assert manifest["format"] == "solotrace-project"
-        assert manifest["schemaVersion"] == 1
+        assert manifest["schemaVersion"] == 2
         assert manifest["project"]["active_version_id"] == source_id
         assert [
             version["id"] for version in manifest["project"]["versions"]

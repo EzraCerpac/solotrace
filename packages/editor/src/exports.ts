@@ -5,6 +5,7 @@ import {
   type ConnectedTechnique,
 } from './fingering'
 import type {
+  ChordEvent,
   EditorProject,
   ExportArtifact,
   ExportFormat,
@@ -13,7 +14,7 @@ import type {
 
 const PITCH_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const PROJECT_FORMAT = 'solotrace-project'
-const PROJECT_SCHEMA_VERSION = 1
+const PROJECT_SCHEMA_VERSION = 2
 
 function pitchName(midiPitch: number): string {
   return `${PITCH_NAMES[((midiPitch % 12) + 12) % 12]}${Math.floor(midiPitch / 12) - 1}`
@@ -229,6 +230,45 @@ function musicXmlNote(
   return lines
 }
 
+function musicXmlHarmony(chord: ChordEvent, measureStart: number): string[] {
+  const lines = ['    <harmony>']
+  if (chord.kind === 'chord' && chord.root && chord.quality) {
+    lines.push('      <root>', `        <root-step>${chord.root.step}</root-step>`)
+    if (chord.root.alter) lines.push(`        <root-alter>${chord.root.alter}</root-alter>`)
+    lines.push('      </root>')
+    const kindNames: Record<NonNullable<ChordEvent['quality']>, string> = {
+      min: 'minor',
+      maj: 'major',
+      dim: 'diminished',
+      aug: 'augmented',
+      min6: 'minor-sixth',
+      maj6: 'major-sixth',
+      min7: 'minor-seventh',
+      minmaj7: 'major-minor',
+      maj7: 'major-seventh',
+      '7': 'dominant',
+      dim7: 'diminished-seventh',
+      hdim7: 'half-diminished',
+      sus2: 'suspended-second',
+      sus4: 'suspended-fourth',
+    }
+    lines.push(`      <kind>${kindNames[chord.quality]}</kind>`)
+    if (chord.bass) {
+      lines.push('      <bass>', `        <bass-step>${chord.bass.step}</bass-step>`)
+      if (chord.bass.alter) lines.push(`        <bass-alter>${chord.bass.alter}</bass-alter>`)
+      lines.push('      </bass>')
+    }
+  } else {
+    const text = chord.kind === 'no-chord' ? 'N.C.' : 'X'
+    const kind = chord.kind === 'no-chord' ? 'none' : 'other'
+    lines.push(`      <kind text="${text}">${kind}</kind>`)
+  }
+  const offset = Math.max(0, chord.score_tick - measureStart)
+  if (offset) lines.push(`      <offset>${offset}</offset>`)
+  lines.push('    </harmony>')
+  return lines
+}
+
 export function musicXml(project: EditorProject): string {
   const tab = activeVersion(project).tab
   const ticksPerMeasure = measureTicks(project)
@@ -250,7 +290,12 @@ export function musicXml(project: EditorProject): string {
   for (const segment of segments) {
     grouped.set(segment.measureNumber, [...(grouped.get(segment.measureNumber) ?? []), segment])
   }
-  const lastMeasure = Math.max(1, ...grouped.keys())
+  const harmonies = new Map<number, ChordEvent[]>()
+  for (const chord of tab.chords.events) {
+    const measureNumber = Math.floor(chord.score_tick / ticksPerMeasure) + 1
+    harmonies.set(measureNumber, [...(harmonies.get(measureNumber) ?? []), chord])
+  }
+  const lastMeasure = Math.max(1, ...grouped.keys(), ...harmonies.keys())
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<score-partwise version="4.0">',
@@ -293,7 +338,13 @@ export function musicXml(project: EditorProject): string {
         '    </direction>',
       )
     }
-    let cursor = (measureNumber - 1) * ticksPerMeasure
+    const measureStart = (measureNumber - 1) * ticksPerMeasure
+    for (const chord of [...(harmonies.get(measureNumber) ?? [])].sort(
+      (left, right) => left.score_tick - right.score_tick || left.id.localeCompare(right.id),
+    )) {
+      lines.push(...musicXmlHarmony(chord, measureStart))
+    }
+    let cursor = measureStart
     const measureSegments = grouped.get(measureNumber) ?? []
     measureSegments.forEach((segment) => {
       if (segment.startTick > cursor) {

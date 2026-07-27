@@ -2,8 +2,10 @@
 
 import {
   activeVersion,
+  applyVersionAction as applyEditorVersionAction,
   createRefingeredVersion,
   fingeringPreservesConnectedTechniques,
+  type ChordTrack,
   type EditorProject,
   type ExportFormat,
   type FingeringMode,
@@ -17,6 +19,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { TabCanvas } from "./ExampleStudio";
+import { HostedChordInspector } from "./HostedChordInspector";
 import {
   useCallback,
   useEffect,
@@ -120,6 +123,7 @@ export function SavedProjectStudio({ id }: SavedProjectStudioProps) {
   const [title, setTitle] = useState("");
   const [savedSignature, setSavedSignature] = useState("");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [selectedChordId, setSelectedChordId] = useState<string | null>(null);
   const [stem, setStem] = useState<StemRole>("original");
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
@@ -243,6 +247,10 @@ export function SavedProjectStudio({ id }: SavedProjectStudioProps) {
   const selectedNote = useMemo(
     () => version?.tab.notes.find((note) => note.id === selectedNoteId) ?? null,
     [selectedNoteId, version],
+  );
+  const selectedChord = useMemo(
+    () => version?.tab.chords.events.find((chord) => chord.id === selectedChordId) ?? null,
+    [selectedChordId, version],
   );
   const selectedNoteIndex = useMemo(
     () => version?.tab.notes.findIndex((note) => note.id === selectedNoteId) ?? -1,
@@ -399,6 +407,26 @@ export function SavedProjectStudio({ id }: SavedProjectStudioProps) {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Export could not be created.");
     }
+  };
+
+  const replaceChords = (track: ChordTrack, nextMessage: string) => {
+    if (!project) return;
+    if (track === version?.tab.chords) {
+      setMessage(nextMessage);
+      return;
+    }
+    setProject(
+      applyEditorVersionAction(
+        project,
+        {
+          type: "replace-chords",
+          versionId: project.active_version_id,
+          track,
+        },
+        new Date().toISOString(),
+      ),
+    );
+    setMessage(`${nextMessage} Save to keep it.`);
   };
 
   if (loading) {
@@ -600,10 +628,17 @@ export function SavedProjectStudio({ id }: SavedProjectStudioProps) {
           project={project}
           currentTime={currentTime}
           selectedNoteId={selectedNoteId}
+          selectedChordId={selectedChordId}
           disabled={editorDisabled}
           onSelect={(note) => {
+            setSelectedChordId(null);
             setSelectedNoteId(note.id);
             seek(note.audio_onset_s);
+          }}
+          onSelectChord={(chord) => {
+            setSelectedNoteId(null);
+            setSelectedChordId(chord.id);
+            seek(chord.audio_onset_s);
           }}
         />
 
@@ -646,8 +681,18 @@ export function SavedProjectStudio({ id }: SavedProjectStudioProps) {
           </aside>
 
           <aside className="example-studio__inspector" aria-labelledby="saved-inspector-heading">
-            <h3 id="saved-inspector-heading">Selected note</h3>
-            {selectedNote ? (
+            <h3 id="saved-inspector-heading">{selectedChord ? "Selected chord" : "Selected note"}</h3>
+            {selectedChord ? (
+              <HostedChordInspector
+                key={selectedChord.id}
+                chord={selectedChord}
+                track={version.tab.chords}
+                tab={version.tab}
+                currentTime={currentTime}
+                disabled={editorDisabled}
+                onChange={replaceChords}
+              />
+            ) : selectedNote ? (
               <>
                 <dl className="example-studio__note-facts">
                   <div><dt>Pitch</dt><dd>MIDI {selectedNote.midi_pitch}</dd></div>

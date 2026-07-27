@@ -12,6 +12,7 @@ dependencies = [
   "librosa>=0.11.0,<0.12",
   "mido>=1.3.3,<2",
   "numpy>=2.0,<3",
+  "onnxruntime==1.27.0",
   "platformdirs>=4.3,<5",
   "python-multipart>=0.0.20,<0.1",
   "scipy>=1.15,<2",
@@ -21,6 +22,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "mir-eval>=0.8.2,<0.9",
   "pytest>=9.1.1,<10",
   "pytest-cov>=7.1,<8",
   "ruff>=0.15.22,<0.16",
@@ -46,6 +48,7 @@ packages = ["server/solotrace"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "web/dist" = "solotrace/static"
+"server/solotrace/resources/chordmini" = "solotrace/resources/chordmini"
 
 [tool.uv]
 # SoloTrace ships Basic Pitch's CoreML model on macOS/Python 3.11. Its

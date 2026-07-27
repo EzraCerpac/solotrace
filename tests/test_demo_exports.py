@@ -8,6 +8,7 @@ import mido
 import pytest
 from solotrace.demo import DEMO_ID, ensure_demo
 from solotrace.exports import ascii_tab, bundle, export_filename, midi, musicxml
+from solotrace.models import ChordTrack
 from solotrace.storage import ProjectStore
 
 
@@ -60,6 +61,7 @@ def test_musicxml_respects_denominator_tempo_and_splits_cross_measure_note(tmp_p
             "tempo_bpm": 137.5,
             "time_signature": (6, 8),
             "notes": [crossing_note],
+            "chords": ChordTrack(),
         }
     )
     project = project.replace_active_tab(tab)

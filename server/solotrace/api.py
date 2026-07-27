@@ -26,6 +26,7 @@ from .audio import (
     probe_audio,
     waveform_peaks,
 )
+from .chords import normalize_edited_chords, recognition_capability
 from .config import Settings, delete_mvsep_token, store_mvsep_token
 from .demo import DEMO_ID, ensure_demo
 from .diagnostics import configure_logging, diagnostic_bundle
@@ -34,6 +35,8 @@ from .exports import export_filename, export_payload, write_bundle
 from .fingering import assign_fingerings
 from .imports import ProjectImportError, import_project_bundle
 from .models import (
+    AnalyzeChordsRequest,
+    ChordPatch,
     HealthResponse,
     MediaAsset,
     MVSepTokenRequest,
@@ -221,6 +224,10 @@ def _version_summary(version: TabVersion) -> TabVersionSummary:
         needs_review_count=sum(
             not note.reviewed and note.confidence.minimum < 0.72 for note in version.tab.notes
         ),
+        chord_count=len(version.tab.chords.events),
+        chord_needs_review_count=sum(
+            not chord.reviewed for chord in version.tab.chords.events
+        ),
     )
 
 
@@ -240,6 +247,8 @@ def _project_summary(project: Project) -> ProjectSummary:
         active_version_name=active.name,
         note_count=active.note_count,
         needs_review_count=active.needs_review_count,
+        chord_count=active.chord_count,
+        chord_needs_review_count=active.chord_needs_review_count,
     )
 
 
@@ -321,6 +330,7 @@ def capabilities(request: Request) -> dict[str, object]:
                 "basicPitch": settings.basic_pitch_available,
             },
         },
+        "chords": recognition_capability(),
         "cloudReady": cloud,
         "cloud": {
             "configured": bool(settings.mvsep_api_token),
@@ -890,6 +900,82 @@ def patch_tab(
             project_id,
             update,
             reason="edit notes",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post(
+    "/api/projects/{project_id}/versions/{version_id}/analyze-chords",
+    response_model=ProjectView,
+    status_code=202,
+)
+def analyze_chords(
+    project_id: str,
+    version_id: str,
+    body: AnalyzeChordsRequest,
+    request: Request,
+) -> ProjectView:
+    project = _project_or_404(_store(request), project_id)
+    _version_or_404(project, version_id)
+    start_s = project.passage.start_s if body.start_s is None else body.start_s
+    end_s = project.passage.end_s if body.end_s is None else body.end_s
+    try:
+        return _project_view(
+            request.app.state.pipeline.start_chords(
+                project_id,
+                version_id,
+                start_s=start_s,
+                end_s=end_s,
+                expected_revision=body.expected_revision,
+            )
+        )
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.patch(
+    "/api/projects/{project_id}/versions/{version_id}/chords",
+    response_model=ProjectView,
+)
+def patch_chords(
+    project_id: str,
+    version_id: str,
+    body: ChordPatch,
+    request: Request,
+) -> ProjectView:
+    def update(project: Project) -> Project:
+        _version_or_404(project, version_id)
+        target = project.model_copy(update={"active_version_id": version_id})
+        track = normalize_edited_chords(target, body.track)
+        timestamp = now_iso()
+        versions = [
+            version.model_copy(
+                update={
+                    "tab": version.tab.model_copy(update={"chords": track}),
+                    "updated_at": timestamp,
+                }
+            )
+            if version.id == version_id
+            else version
+            for version in project.versions
+        ]
+        return project.model_copy(update={"versions": versions})
+
+    try:
+        project = _store(request).update(
+            project_id,
+            update,
+            reason="edit chords",
             expected_revision=body.expected_revision,
             bump_revision=True,
         )

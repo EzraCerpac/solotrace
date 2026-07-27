@@ -14,6 +14,12 @@ from .audio import (
     create_preview_stems,
     transcribe_pyin,
 )
+from .chords import (
+    ChordRecognitionCancelled,
+    ChordRecognitionUnavailable,
+    recognition_capability,
+    recognize_chords,
+)
 from .config import Settings
 from .enhanced import transcribe_basic_pitch
 from .models import (
@@ -48,7 +54,17 @@ def new_run() -> ProcessingRun:
             PipelineStage(id="hear", label="Hear notes"),
             PipelineStage(id="rhythm", label="Match rhythm"),
             PipelineStage(id="fingering", label="Choose frets"),
+            PipelineStage(id="chords", label="Find chords"),
         ],
+    )
+
+
+def new_chord_run() -> ProcessingRun:
+    return ProcessingRun(
+        id=f"run-{uuid.uuid4().hex[:12]}",
+        state=RunState.queued,
+        message="Waiting to find chords",
+        stages=[PipelineStage(id="chords", label="Find chords")],
     )
 
 
@@ -212,6 +228,66 @@ class Pipeline:
         if project is None:
             raise KeyError(project_id)
         return project
+
+    def start_chords(
+        self,
+        project_id: str,
+        version_id: str,
+        *,
+        start_s: float,
+        end_s: float,
+        expected_revision: int,
+    ) -> Project:
+        if self._closing:
+            raise RuntimeError("SoloTrace is shutting down")
+        available = recognition_capability()
+        if not available["available"]:
+            raise ChordRecognitionUnavailable(str(available["detail"]))
+        project = self.store.get(project_id)
+        if project is None:
+            raise KeyError(project_id)
+        if project.revision != expected_revision:
+            raise RevisionConflictError(
+                f"Expected revision {expected_revision}, current revision is {project.revision}"
+            )
+        if not any(version.id == version_id for version in project.versions):
+            raise ValueError("Tab version not found")
+        if (
+            start_s < project.passage.start_s
+            or end_s > min(project.passage.end_s, project.duration_s)
+            or end_s <= start_s
+        ):
+            raise ValueError("Chord range must stay inside the transcription range")
+        with self._lock:
+            if self._project_jobs.get(project_id):
+                raise RuntimeError("This project is already being processed")
+            run = new_chord_run()
+            cancellation = threading.Event()
+            self._project_jobs[project_id] = run.id
+            self._project_cancellations[project_id] = cancellation
+        try:
+            queued = self.store.update(
+                project_id,
+                lambda current: current.model_copy(update={"run": run}),
+                reason="queue chord draft",
+                expected_revision=expected_revision,
+            )
+        except RevisionConflictError:
+            with self._lock:
+                self._project_jobs.pop(project_id, None)
+                self._project_cancellations.pop(project_id, None)
+            raise
+        self.executor.submit(
+            self._execute_chords,
+            project_id,
+            version_id,
+            run.id,
+            expected_revision,
+            start_s,
+            end_s,
+            cancellation,
+        )
+        return queued
 
     def cancel_and_wait(self, project_id: str, timeout_seconds: float = 15.0) -> bool:
         with self._lock:
@@ -446,6 +522,38 @@ class Pipeline:
                     stage_id="fingering",
                     stage_state=StageState.complete,
                 )
+                capability = recognition_capability()
+                if capability["available"]:
+                    self._set_run(
+                        project_id,
+                        run_id,
+                        stage_id="chords",
+                        stage_state=StageState.running,
+                        message="Finding chords",
+                    )
+                    chord_track = recognize_chords(
+                        original,
+                        start_s,
+                        end_s,
+                        tab,
+                        cancelled=cancellation.is_set,
+                    )
+                    tab = tab.model_copy(update={"chords": chord_track})
+                    self._set_run(
+                        project_id,
+                        run_id,
+                        stage_id="chords",
+                        stage_state=StageState.complete,
+                        detail=f"Found {len(chord_track.events)} chord spans",
+                    )
+                else:
+                    self._set_run(
+                        project_id,
+                        run_id,
+                        stage_id="chords",
+                        stage_state=StageState.skipped,
+                        detail=str(capability["detail"]),
+                    )
                 if cancellation.is_set():
                     raise MVSepCancelled("Draft cancelled")
                 if self._closing:
@@ -592,7 +700,7 @@ class Pipeline:
                     "when you are ready."
                 ),
             )
-        except (AudioProcessingCancelled, MVSepCancelled):
+        except (AudioProcessingCancelled, ChordRecognitionCancelled, MVSepCancelled):
             self._set_run(
                 project_id,
                 run_id,
@@ -624,3 +732,141 @@ class Pipeline:
                 if self._project_jobs.get(project_id) == run_id:
                     self._project_jobs.pop(project_id, None)
                     self._project_cancellations.pop(project_id, None)
+
+    def _execute_chords(
+        self,
+        project_id: str,
+        version_id: str,
+        run_id: str,
+        base_revision: int,
+        start_s: float,
+        end_s: float,
+        cancellation: threading.Event,
+    ) -> None:
+        completed = False
+        try:
+            project = self.store.get(project_id)
+            if project is None:
+                raise KeyError(project_id)
+            source = next(
+                (version for version in project.versions if version.id == version_id),
+                None,
+            )
+            if source is None:
+                raise ValueError("Tab version not found")
+            self._set_run(
+                project_id,
+                run_id,
+                state=RunState.running,
+                stage_id="chords",
+                stage_state=StageState.running,
+                message="Finding chords",
+            )
+            track = recognize_chords(
+                self.store.project_dir(project_id) / "original.wav",
+                start_s,
+                end_s,
+                source.tab,
+                cancelled=cancellation.is_set,
+            )
+            if cancellation.is_set():
+                raise ChordRecognitionCancelled("Chord recognition cancelled")
+
+            def finish(current: Project) -> Project:
+                current_source = next(
+                    (version for version in current.versions if version.id == version_id),
+                    None,
+                )
+                if current_source is None:
+                    raise ValueError("Tab version not found")
+                existing_names = {version.name.casefold() for version in current.versions}
+                name = "Harmony draft"
+                suffix = 2
+                while name.casefold() in existing_names:
+                    name = f"Harmony draft {suffix}"
+                    suffix += 1
+                timestamp = now_iso()
+                version = TabVersion(
+                    id=f"version-{uuid.uuid4().hex[:12]}",
+                    name=name,
+                    source=f"chords:{version_id}",
+                    fingering_mode=current_source.fingering_mode,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                    tab=current_source.tab.model_copy(update={"chords": track}),
+                )
+                run = current.run.model_copy(
+                    update={
+                        "state": RunState.complete,
+                        "stages": [
+                            stage.model_copy(
+                                update={
+                                    "status": StageState.complete,
+                                    "detail": f"Found {len(track.events)} chord spans",
+                                }
+                            )
+                            for stage in current.run.stages
+                        ],
+                        "message": "Harmony draft ready",
+                        "error": None,
+                        "updated_at": timestamp,
+                    }
+                )
+                return current.model_copy(
+                    update={
+                        "versions": [*current.versions, version],
+                        "active_version_id": version.id,
+                        "run": run,
+                    }
+                )
+
+            with self._lock:
+                if self._closing:
+                    raise PipelineInterrupted
+                self.store.update(
+                    project_id,
+                    finish,
+                    reason="create chord draft",
+                    expected_revision=base_revision,
+                    bump_revision=True,
+                )
+            completed = True
+        except RevisionConflictError:
+            self._set_run(
+                project_id,
+                run_id,
+                state=RunState.failed,
+                message="Your edits are safe",
+                error="The project changed while chords were running. Start again.",
+            )
+        except ChordRecognitionCancelled:
+            self._set_run(
+                project_id,
+                run_id,
+                state=RunState.cancelled,
+                message="Chord draft cancelled",
+            )
+        except (ChordRecognitionUnavailable, PipelineInterrupted, ValueError, OSError) as error:
+            self._set_run(
+                project_id,
+                run_id,
+                state=RunState.failed,
+                message="Chord draft needs help",
+                error=str(error),
+            )
+        except Exception:
+            logger.exception("Unexpected chord-recognition failure")
+            self._set_run(
+                project_id,
+                run_id,
+                state=RunState.failed,
+                message="Chord draft needs help",
+                error="Unexpected chord-recognition error. Check the server log.",
+            )
+        finally:
+            with self._lock:
+                if self._project_jobs.get(project_id) == run_id:
+                    self._project_jobs.pop(project_id, None)
+                    self._project_cancellations.pop(project_id, None)
+            if not completed:
+                logger.info("Chord draft %s ended without publishing a version", run_id)

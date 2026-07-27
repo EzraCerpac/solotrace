@@ -55,6 +55,204 @@
       "name": "Balanced",
       "source": "deterministic example",
       "tab": {
+        "chords": {
+          "analyzed_end_s": 13.4,
+          "analyzed_start_s": 0.35,
+          "engine": "deterministic example progression",
+          "events": [
+            {
+              "alternatives": [],
+              "audio_offset_s": 1.6666666666666667,
+              "audio_onset_s": 0.35,
+              "bass": null,
+              "duration_ticks": 1517,
+              "edited": false,
+              "end_frame": 36750,
+              "id": "switchback-run-chord-01",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 7717,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "E"
+              },
+              "score_tick": 403
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 3.3333333333333335,
+              "audio_onset_s": 1.6666666666666667,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 73500,
+              "id": "switchback-run-chord-02",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 36750,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 1920
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 5.0,
+              "audio_onset_s": 3.3333333333333335,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 110250,
+              "id": "switchback-run-chord-03",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 73500,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "A"
+              },
+              "score_tick": 3840
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 6.666666666666667,
+              "audio_onset_s": 5.0,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 147000,
+              "id": "switchback-run-chord-04",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 110250,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "D"
+              },
+              "score_tick": 5760
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 8.333333333333334,
+              "audio_onset_s": 6.666666666666667,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 183750,
+              "id": "switchback-run-chord-05",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 147000,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "E"
+              },
+              "score_tick": 7680
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 10.0,
+              "audio_onset_s": 8.333333333333334,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 220500,
+              "id": "switchback-run-chord-06",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 183750,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 9600
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 11.666666666666668,
+              "audio_onset_s": 10.0,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 257250,
+              "id": "switchback-run-chord-07",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 220500,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "A"
+              },
+              "score_tick": 11520
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 13.333333333333334,
+              "audio_onset_s": 11.666666666666668,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 294000,
+              "id": "switchback-run-chord-08",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 257250,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "B"
+              },
+              "score_tick": 13440
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 13.4,
+              "audio_onset_s": 13.333333333333334,
+              "bass": null,
+              "duration_ticks": 77,
+              "edited": false,
+              "end_frame": 295470,
+              "id": "switchback-run-chord-09",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 294000,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "E"
+              },
+              "score_tick": 15360
+            }
+          ],
+          "model_revision": null,
+          "model_sha256": null
+        },
         "fret_count": 22,
         "notes": [
           {

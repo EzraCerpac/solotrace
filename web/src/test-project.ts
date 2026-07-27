@@ -1,4 +1,5 @@
 import type { NoteEvent, Project } from './types'
+import { emptyChordTrack } from '@solotrace/editor'
 
 export function makeNote(
   id: string,
@@ -92,6 +93,7 @@ export function makeProject({
         { audio_frame: passage.end_s * 48_000, score_tick: passage.end_s * 960 },
       ],
       notes,
+      chords: emptyChordTrack(),
     },
     versions: [
       {
@@ -103,6 +105,8 @@ export function makeProject({
         updated_at: '',
         note_count: notes.length,
         needs_review_count: 0,
+        chord_count: 0,
+        chord_needs_review_count: 0,
       },
     ],
     active_version_id: 'version-original',

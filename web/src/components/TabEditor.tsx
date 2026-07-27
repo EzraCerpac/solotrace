@@ -5,16 +5,21 @@ import {
   pitchName,
   scoreTickToAudioFrame,
 } from '../music'
-import type { Fingering, Project } from '../types'
+import type { ChordEvent, Fingering, Project } from '../types'
+import { HarmonyLane } from './HarmonyLane'
 import { TablatureStaff } from './TablatureStaff'
 
 interface TabEditorProps {
   project: Project
   currentTime: number
   selectedNoteId: string | null
+  selectedChordId?: string | null
   onSelectNote: (noteId: string) => void
   onSeek: (seconds: number) => void
   onFingeringChange: (noteId: string, fingering: Fingering) => void
+  onSelectChord?: (chord: ChordEvent) => void
+  onChordBoundaryMove?: (leftChordId: string, seconds: number) => void
+  onAddChord?: () => void
   disabled?: boolean
 }
 
@@ -24,9 +29,13 @@ export function TabEditor({
   project,
   currentTime,
   selectedNoteId,
+  selectedChordId = null,
   onSelectNote,
   onSeek,
   onFingeringChange,
+  onSelectChord = () => undefined,
+  onChordBoundaryMove = () => undefined,
+  onAddChord = () => undefined,
   disabled = false,
 }: TabEditorProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -135,27 +144,36 @@ export function TabEditor({
           <span className="legend-mark review" /> Needs review
         </p>
       </div>
-      {project.tab.notes.length === 0 ? (
-        <div className="tab-empty">
-          <p>No notes yet.</p>
-          <span>
-            Transcribe the full song, or optionally limit it to a section above.
-          </span>
-        </div>
-      ) : (
-        <div
-          className="tab-scroll"
-          ref={scrollRef}
-          onDoubleClick={(event) => {
-            const bounds = event.currentTarget.getBoundingClientRect()
-            const absoluteX = event.clientX - bounds.left + event.currentTarget.scrollLeft
-            const progress = Math.max(
-              0,
-              Math.min(1, (absoluteX - side) / innerWidth),
-            )
-            onSeek(passageStart + progress * duration)
-          }}
-        >
+      <div
+        className="tab-scroll"
+        ref={scrollRef}
+        onDoubleClick={(event) => {
+          const bounds = event.currentTarget.getBoundingClientRect()
+          const absoluteX = event.clientX - bounds.left + event.currentTarget.scrollLeft
+          const progress = Math.max(
+            0,
+            Math.min(1, (absoluteX - side) / innerWidth),
+          )
+          onSeek(passageStart + progress * duration)
+        }}
+      >
+        <div className="tab-timeline" style={{ width }}>
+          <HarmonyLane
+            width={width}
+            side={side}
+            passageStart={passageStart}
+            passageEnd={passageEnd}
+            tempoBpm={project.tab.tempo_bpm}
+            beatType={project.tab.time_signature[1]}
+            chords={project.tab.chords.events}
+            currentTime={currentTime}
+            selectedChordId={selectedChordId}
+            editable
+            disabled={disabled}
+            onSelect={onSelectChord}
+            onBoundaryMove={onChordBoundaryMove}
+            onAddAtPlayhead={onAddChord}
+          />
           <TablatureStaff
             width={width}
             labels={labels}
@@ -182,10 +200,9 @@ export function TabEditor({
             onFingeringChange={onFingeringChange}
           />
         </div>
-      )}
+      </div>
       <p className="tab-help">
-        Drag a note across strings. Pitch stays fixed; impossible strings are skipped. Arrow
-        keys provide the same control.
+        Drag notes across strings. Drag chord edges to beats; hold Option for exact time.
       </p>
     </section>
   )

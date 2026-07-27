@@ -49,6 +49,18 @@ export function createRefingeredVersion(
       time_signature: [...source.tab.time_signature],
       sync_anchors: source.tab.sync_anchors.map((anchor) => ({ ...anchor })),
       notes,
+      chords: {
+        ...source.tab.chords,
+        events: source.tab.chords.events.map((event) => ({
+          ...event,
+          root: event.root ? { ...event.root } : null,
+          bass: event.bass ? { ...event.bass } : null,
+          alternatives: event.alternatives.map((alternative) => ({
+            ...alternative,
+            root: alternative.root ? { ...alternative.root } : null,
+          })),
+        })),
+      },
     },
   }
   return {
@@ -85,6 +97,16 @@ export function applyVersionAction(
             ...version,
             updated_at: updatedAt,
             tab: { ...version.tab, notes: [...action.notes] },
+          }
+        : version,
+    )
+  } else if (action.type === 'replace-chords') {
+    versions = versions.map((version) =>
+      version.id === action.versionId
+        ? {
+            ...version,
+            updated_at: updatedAt,
+            tab: { ...version.tab, chords: action.track },
           }
         : version,
     )

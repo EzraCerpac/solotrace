@@ -10,6 +10,7 @@ import {
 } from '../tab-layout'
 import type { Project } from '../types'
 import { TablatureStaff } from './TablatureStaff'
+import { HarmonyLane } from './HarmonyLane'
 
 interface PlayTabProps {
   project: Project
@@ -248,7 +249,24 @@ export function PlayTab({ project, currentTime, playing, onSeek }: PlayTabProps)
               aria-label={`Tab ${system.measures[0].number} through ${system.measures.at(-1)!.number}`}
             >
               <div className="play-system-scroll">
-                <TablatureStaff
+                <div className="tab-timeline" style={{ width: system.width }}>
+                  <HarmonyLane
+                    width={system.width}
+                    side={PLAY_SIDE}
+                    passageStart={system.start_s}
+                    passageEnd={system.end_s}
+                    tempoBpm={project.tab.tempo_bpm}
+                    beatType={project.tab.time_signature[1]}
+                    chords={project.tab.chords.events}
+                    currentTime={currentTime}
+                    selectedChordId={null}
+                    editable={false}
+                    disabled={false}
+                    onSelect={(chord) => onSeek(chord.audio_onset_s)}
+                    onBoundaryMove={() => undefined}
+                    onAddAtPlayhead={() => undefined}
+                  />
+                  <TablatureStaff
                   width={system.width}
                   labels={labels}
                   measures={system.measures.map((measure) => ({
@@ -269,7 +287,8 @@ export function PlayTab({ project, currentTime, playing, onSeek }: PlayTabProps)
                       (system.width / Math.max(1, bounds.width))
                     onSeek(timeForSystemX(system, localX))
                   }}
-                />
+                  />
+                </div>
               </div>
             </section>
           )

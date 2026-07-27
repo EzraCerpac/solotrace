@@ -38,7 +38,7 @@
     "start_s": 1.0
   },
   "provenance": [
-    "Demo version 3.",
+    "Demo version 4.",
     "Original SoloTrace synthetic melody and audio, dedicated to CC0 1.0.",
     "Generated deterministically by SoloTrace; no recording, cloud service, or runtime compute used."
   ],
@@ -55,6 +55,162 @@
       "name": "Balanced",
       "source": "deterministic example",
       "tab": {
+        "chords": {
+          "analyzed_end_s": 16.8,
+          "analyzed_start_s": 1.0,
+          "engine": "deterministic example progression",
+          "events": [
+            {
+              "alternatives": [],
+              "audio_offset_s": 2.608695652173913,
+              "audio_onset_s": 1.0,
+              "bass": null,
+              "duration_ticks": 1184,
+              "edited": false,
+              "end_frame": 57522,
+              "id": "northbound-lights-chord-01",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 22050,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "A"
+              },
+              "score_tick": 736
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 5.217391304347826,
+              "audio_onset_s": 2.608695652173913,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 115043,
+              "id": "northbound-lights-chord-02",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 57522,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "F"
+              },
+              "score_tick": 1920
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 7.826086956521739,
+              "audio_onset_s": 5.217391304347826,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 172565,
+              "id": "northbound-lights-chord-03",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 115043,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "C"
+              },
+              "score_tick": 3840
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 10.434782608695652,
+              "audio_onset_s": 7.826086956521739,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 230087,
+              "id": "northbound-lights-chord-04",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 172565,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "G"
+              },
+              "score_tick": 5760
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 13.043478260869566,
+              "audio_onset_s": 10.434782608695652,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 287609,
+              "id": "northbound-lights-chord-05",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 230087,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "A"
+              },
+              "score_tick": 7680
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 15.652173913043478,
+              "audio_onset_s": 13.043478260869566,
+              "bass": null,
+              "duration_ticks": 1920,
+              "edited": false,
+              "end_frame": 345130,
+              "id": "northbound-lights-chord-06",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 287609,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "F"
+              },
+              "score_tick": 9600
+            },
+            {
+              "alternatives": [],
+              "audio_offset_s": 16.8,
+              "audio_onset_s": 15.652173913043478,
+              "bass": null,
+              "duration_ticks": 845,
+              "edited": false,
+              "end_frame": 370440,
+              "id": "northbound-lights-chord-07",
+              "kind": "chord",
+              "model_score": null,
+              "onset_frame": 345130,
+              "provenance": "example",
+              "quality": "maj",
+              "reviewed": true,
+              "root": {
+                "alter": 0,
+                "step": "C"
+              },
+              "score_tick": 11520
+            }
+          ],
+          "model_revision": null,
+          "model_sha256": null
+        },
         "fret_count": 22,
         "notes": [
           {

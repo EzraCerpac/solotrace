@@ -8,6 +8,23 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 ProcessingEngine = Literal["preview", "mvsep"]
 FingeringMode = Literal["balanced", "easiest", "position"]
+ChordKind = Literal["chord", "no-chord", "unknown"]
+ChordQuality = Literal[
+    "min",
+    "maj",
+    "dim",
+    "aug",
+    "min6",
+    "maj6",
+    "min7",
+    "minmaj7",
+    "maj7",
+    "7",
+    "dim7",
+    "hdim7",
+    "sus2",
+    "sus4",
+]
 
 
 def now_iso() -> str:
@@ -68,6 +85,84 @@ class SyncAnchor(StrictModel):
     score_tick: int = Field(ge=0)
 
 
+class SpelledPitch(StrictModel):
+    step: Literal["A", "B", "C", "D", "E", "F", "G"]
+    alter: int = Field(default=0, ge=-2, le=2)
+
+
+class ChordAlternative(StrictModel):
+    kind: ChordKind
+    root: SpelledPitch | None = None
+    quality: ChordQuality | None = None
+    model_score: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_symbol(self) -> ChordAlternative:
+        if self.kind == "chord" and (self.root is None or self.quality is None):
+            raise ValueError("Chord alternatives require a root and quality")
+        if self.kind != "chord" and (self.root is not None or self.quality is not None):
+            raise ValueError("N.C. and unknown alternatives cannot have a root or quality")
+        return self
+
+
+class ChordEvent(StrictModel):
+    id: str = Field(min_length=1, max_length=96)
+    onset_frame: int = Field(ge=0)
+    end_frame: int = Field(gt=0)
+    audio_onset_s: float = Field(ge=0)
+    audio_offset_s: float = Field(gt=0)
+    score_tick: int = Field(ge=0)
+    duration_ticks: int = Field(gt=0)
+    kind: ChordKind
+    root: SpelledPitch | None = None
+    quality: ChordQuality | None = None
+    bass: SpelledPitch | None = None
+    model_score: float | None = Field(default=None, ge=0, le=1)
+    alternatives: list[ChordAlternative] = Field(default_factory=list, max_length=3)
+    provenance: Literal["detected", "manual", "example"] = "manual"
+    edited: bool = False
+    reviewed: bool = False
+
+    @model_validator(mode="after")
+    def validate_ranges_and_symbol(self) -> ChordEvent:
+        if self.end_frame <= self.onset_frame:
+            raise ValueError("end_frame must be after onset_frame")
+        if self.audio_offset_s <= self.audio_onset_s:
+            raise ValueError("audio_offset_s must be after audio_onset_s")
+        if self.kind == "chord" and (self.root is None or self.quality is None):
+            raise ValueError("Chords require a root and quality")
+        if self.kind != "chord" and (
+            self.root is not None or self.quality is not None or self.bass is not None
+        ):
+            raise ValueError("N.C. and unknown events cannot have chord pitches")
+        return self
+
+
+class ChordTrack(StrictModel):
+    engine: str = Field(default="manual", min_length=1, max_length=80)
+    model_revision: str | None = Field(default=None, max_length=80)
+    model_sha256: str | None = Field(
+        default=None,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    analyzed_start_s: float | None = Field(default=None, ge=0)
+    analyzed_end_s: float | None = Field(default=None, gt=0)
+    events: list[ChordEvent] = Field(default_factory=list, max_length=20000)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> ChordTrack:
+        if (self.analyzed_start_s is None) != (self.analyzed_end_s is None):
+            raise ValueError("Chord analysis range must have both start and end")
+        if (
+            self.analyzed_start_s is not None
+            and self.analyzed_end_s is not None
+            and self.analyzed_end_s <= self.analyzed_start_s
+        ):
+            raise ValueError("Chord analysis range end must be after its start")
+        return self
+
+
 class TabDocument(StrictModel):
     sample_rate: int = Field(gt=0)
     ticks_per_quarter: int = Field(default=480, gt=0)
@@ -77,6 +172,7 @@ class TabDocument(StrictModel):
     fret_count: int = Field(default=22, ge=12, le=36)
     sync_anchors: list[SyncAnchor] = Field(default_factory=list, max_length=5000)
     notes: list[NoteEvent] = Field(default_factory=list, max_length=10000)
+    chords: ChordTrack = Field(default_factory=ChordTrack)
 
     @field_validator("tuning")
     @classmethod
@@ -251,6 +347,8 @@ class TabVersionSummary(StrictModel):
     updated_at: str
     note_count: int = Field(ge=0)
     needs_review_count: int = Field(ge=0)
+    chord_count: int = Field(ge=0)
+    chord_needs_review_count: int = Field(ge=0)
 
 
 class ProjectSummary(StrictModel):
@@ -267,6 +365,8 @@ class ProjectSummary(StrictModel):
     active_version_name: str
     note_count: int = Field(ge=0)
     needs_review_count: int = Field(ge=0)
+    chord_count: int = Field(ge=0)
+    chord_needs_review_count: int = Field(ge=0)
 
 
 class ProjectView(StrictModel):
@@ -353,6 +453,28 @@ class MVSepTokenRequest(StrictModel):
 class TabPatch(StrictModel):
     expected_revision: int = Field(ge=1)
     notes: Annotated[list[NoteEvent], Field(max_length=10000)]
+
+
+class ChordPatch(StrictModel):
+    expected_revision: int = Field(ge=1)
+    track: ChordTrack
+
+
+class AnalyzeChordsRequest(ProjectMutationRequest):
+    start_s: float | None = Field(default=None, ge=0)
+    end_s: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> AnalyzeChordsRequest:
+        if (self.start_s is None) != (self.end_s is None):
+            raise ValueError("Chord range needs both start and end")
+        if (
+            self.start_s is not None
+            and self.end_s is not None
+            and self.end_s <= self.start_s
+        ):
+            raise ValueError("Chord range end must be after its start")
+        return self
 
 
 class HealthResponse(StrictModel):

@@ -1,3 +1,4 @@
+export * from './chords'
 export * from './exports'
 export * from './fingering'
 export * from './types'

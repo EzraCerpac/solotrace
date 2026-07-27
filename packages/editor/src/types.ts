@@ -2,6 +2,23 @@ export type AssetRole = 'original' | 'lead' | 'backing'
 export type ExportFormat = 'json' | 'musicxml' | 'midi' | 'ascii'
 export type FingeringMode = 'balanced' | 'easiest' | 'position'
 export type ProjectOrigin = 'local' | 'example' | 'saved-example'
+export type ChordKind = 'chord' | 'no-chord' | 'unknown'
+export type ChordQuality =
+  | 'min'
+  | 'maj'
+  | 'dim'
+  | 'aug'
+  | 'min6'
+  | 'maj6'
+  | 'min7'
+  | 'minmaj7'
+  | 'maj7'
+  | '7'
+  | 'dim7'
+  | 'hdim7'
+  | 'sus2'
+  | 'sus4'
+export type ChordProvenance = 'detected' | 'manual' | 'example'
 
 export interface Confidence {
   pitch: number
@@ -41,6 +58,46 @@ export interface SyncAnchor {
   score_tick: number
 }
 
+export interface SpelledPitch {
+  step: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G'
+  alter: number
+}
+
+export interface ChordAlternative {
+  kind: ChordKind
+  root: SpelledPitch | null
+  quality: ChordQuality | null
+  model_score: number
+}
+
+export interface ChordEvent {
+  id: string
+  onset_frame: number
+  end_frame: number
+  audio_onset_s: number
+  audio_offset_s: number
+  score_tick: number
+  duration_ticks: number
+  kind: ChordKind
+  root: SpelledPitch | null
+  quality: ChordQuality | null
+  bass: SpelledPitch | null
+  model_score: number | null
+  alternatives: ChordAlternative[]
+  provenance: ChordProvenance
+  edited: boolean
+  reviewed: boolean
+}
+
+export interface ChordTrack {
+  engine: string
+  model_revision: string | null
+  model_sha256: string | null
+  analyzed_start_s: number | null
+  analyzed_end_s: number | null
+  events: ChordEvent[]
+}
+
 export interface TabDocument {
   sample_rate: number
   ticks_per_quarter: number
@@ -50,6 +107,7 @@ export interface TabDocument {
   fret_count: number
   sync_anchors: SyncAnchor[]
   notes: NoteEvent[]
+  chords: ChordTrack
 }
 
 export interface TabVersion {
@@ -128,6 +186,7 @@ export interface HostedCapabilityFlags {
   saveCopies: boolean
   uploads: boolean
   processing: boolean
+  chordRecognition: boolean
   projectBundles: boolean
   maxSavedCopies: number
   maxDocumentBytes: number
@@ -139,6 +198,7 @@ export const HOSTED_EXAMPLE_CAPABILITIES = Object.freeze({
   saveCopies: true,
   uploads: false,
   processing: false,
+  chordRecognition: false,
   projectBundles: false,
   maxSavedCopies: 3,
   maxDocumentBytes: 256 * 1024,
@@ -168,6 +228,7 @@ export type VersionAction =
   | { type: 'rename'; versionId: string; name: string }
   | { type: 'delete'; versionId: string }
   | { type: 'replace-notes'; versionId: string; notes: NoteEvent[] }
+  | { type: 'replace-chords'; versionId: string; track: ChordTrack }
 
 export interface VersionActionRequest {
   projectId: string

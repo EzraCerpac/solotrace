@@ -7,12 +7,19 @@ import {
   asciiTab,
   assignFingerings,
   createRefingeredVersion,
+  deleteChordToUnknown,
+  emptyChordTrack,
   exportProject,
   isEditorProject,
   legalFingerings,
+  mergeChord,
   midi,
   musicXml,
+  normalizeChordTrack,
+  parseChordSymbol,
   projectJson,
+  replaceChordSymbol,
+  splitChord,
   validateConnectedTechniqueFingerings,
 } from '../src/index.ts'
 
@@ -62,6 +69,7 @@ const project = (notes = [note('a', 64, 0), note('b', 67, 0.5)]) => ({
       fret_count: 22,
       sync_anchors: [{ audio_frame: 0, score_tick: 0 }],
       notes,
+      chords: emptyChordTrack(),
     },
   }],
   active_version_id: 'balanced',
@@ -152,6 +160,68 @@ test('refingering appends and activates a version', () => {
     '2026-01-03T00:00:00Z',
   )
   assert.equal(activeVersion(renamed).name, 'Low movement')
+})
+
+test('chord aliases, boundaries, shared actions, and MusicXML stay lossless', () => {
+  assert.deepEqual(parseChordSymbol('Dbmin7/Gb'), {
+    kind: 'chord',
+    root: { step: 'D', alter: -1 },
+    quality: 'min7',
+    bass: { step: 'G', alter: -1 },
+  })
+  assert.equal(parseChordSymbol('C-').quality, 'min')
+  assert.equal(parseChordSymbol('N.C.').kind, 'no-chord')
+  assert.equal(parseChordSymbol('X').kind, 'unknown')
+
+  const candidate = project()
+  const tab = activeVersion(candidate).tab
+  const chord = {
+    id: 'chord-a',
+    onset_frame: 0,
+    end_frame: 1,
+    audio_onset_s: 0,
+    audio_offset_s: 4,
+    score_tick: 0,
+    duration_ticks: 1,
+    kind: 'chord',
+    root: { step: 'C', alter: 0 },
+    quality: 'maj',
+    bass: null,
+    model_score: 0.7,
+    alternatives: [],
+    provenance: 'detected',
+    edited: false,
+    reviewed: false,
+  }
+  let track = normalizeChordTrack({
+    engine: 'ChordMini 2E1D ONNX',
+    model_revision: 'revision',
+    model_sha256: 'a'.repeat(64),
+    analyzed_start_s: 0,
+    analyzed_end_s: 4,
+    events: [chord],
+  }, tab)
+  track = splitChord(track, 'chord-a', 2, 'chord-b')
+  track = replaceChordSymbol(track, 'chord-b', 'Dbm7/Gb')
+  track = normalizeChordTrack(track, tab)
+  assert.equal(track.events[0].audio_offset_s, track.events[1].audio_onset_s)
+  assert.equal(track.events[1].root.alter, -1)
+
+  const changed = applyVersionAction(
+    candidate,
+    { type: 'replace-chords', versionId: 'balanced', track },
+    '2026-01-03T00:00:00Z',
+  )
+  assert.equal(activeVersion(changed).tab.chords.events.length, 2)
+  const xml = musicXml(changed)
+  assert.match(xml, /<root-step>D<\/root-step>/)
+  assert.match(xml, /<root-alter>-1<\/root-alter>/)
+  assert.match(xml, /<bass-step>G<\/bass-step>/)
+
+  track = mergeChord(track, 'chord-b', 'left')
+  assert.equal(track.events.length, 1)
+  track = deleteChordToUnknown(track, 'chord-b')
+  assert.equal(track.events[0].kind, 'unknown')
 })
 
 test('ASCII, MusicXML, MIDI, and JSON exports are parseable', () => {
