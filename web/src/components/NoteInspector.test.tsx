@@ -58,7 +58,7 @@ test('keeps review actions visible and saves edits as reviewed', () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
   expect(callbacks.onSave).toHaveBeenCalledWith(
-    expect.objectContaining({ id: note.id, reviewed: true, user_locked: false }),
+    expect.objectContaining({ id: note.id, reviewed: true, user_locked: true }),
   )
 
   fireEvent.click(screen.getByRole('button', { name: 'Delete note' }))

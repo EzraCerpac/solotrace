@@ -62,6 +62,16 @@ function exampleFetch(calls: FetchCall[] = []): typeof fetch {
   }) as typeof fetch;
 }
 
+test("example documents revalidate so deployed schema updates reach existing visitors", async () => {
+  const calls: FetchCall[] = [];
+  await new HostedEditorClient({
+    fetch: exampleFetch(calls),
+    storage: null,
+  }).loadProject({ origin: "example", slug: SLUG });
+
+  assert.equal(calls[0]?.init?.cache, "no-cache");
+});
+
 test("anonymous edits survive reload and Reset restores the immutable example", async () => {
   const storage = new MemoryStorage();
   const firstClient = new HostedEditorClient({
@@ -98,6 +108,30 @@ test("anonymous edits survive reload and Reset restores the immutable example", 
   assert.equal(reset.revision, base.revision);
   assert.equal(reset.versions.length, base.versions.length);
   assert.equal(storage.getItem(DRAFT_KEY), null);
+});
+
+test("legacy anonymous drafts inherit deterministic example chords", async () => {
+  const storage = new MemoryStorage();
+  const legacyDraft = cloneBase();
+  legacyDraft.revision += 1;
+  legacyDraft.versions[0].tab.notes[0].reviewed = true;
+  for (const version of legacyDraft.versions) delete version.tab.chords;
+  storage.setItem(DRAFT_KEY, JSON.stringify(legacyDraft));
+
+  const restored = await new HostedEditorClient({
+    fetch: exampleFetch(),
+    storage,
+  }).loadProject({ origin: "example", slug: SLUG });
+
+  assert.equal(restored.revision, legacyDraft.revision);
+  assert.equal(restored.versions[0].tab.notes[0].reviewed, true);
+  assert.deepEqual(
+    restored.versions.map((version) => version.tab.chords.events.length),
+    baseProject.versions.map((version: { tab: { chords: { events: unknown[] } } }) =>
+      version.tab.chords.events.length
+    ),
+  );
+  assert.ok(restored.versions.every((version) => version.tab.chords.engine !== "manual"));
 });
 
 test("hosted exports produce parseable JSON, MusicXML, MIDI, and ASCII", async () => {

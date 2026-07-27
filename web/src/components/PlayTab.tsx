@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { soundingTuning } from '@solotrace/editor'
 import { formatTime, pitchName } from '../music'
 import {
-  buildPlaySystems,
+  buildRhythmicTabSystems,
   PLAY_SIDE,
-  timeForSystemX,
   type PlayRestSystem,
   type PlayTabSystem,
 } from '../tab-layout'
 import type { Project } from '../types'
-import { TablatureStaff } from './TablatureStaff'
 import { HarmonyLane } from './HarmonyLane'
+import { RhythmicTabStaff } from './RhythmicTabStaff'
 
 interface PlayTabProps {
   project: Project
@@ -141,11 +141,11 @@ export function PlayTab({ project, currentTime, playing, onSeek }: PlayTabProps)
   const followedSystemRef = useRef<string | null>(null)
   const [containerWidth, setContainerWidth] = useState(960)
   const labels = useMemo(
-    () => [...project.tab.tuning].reverse().map(pitchName),
-    [project.tab.tuning],
+    () => soundingTuning(project.tab).reverse().map(pitchName),
+    [project.tab],
   )
   const systems = useMemo(
-    () => buildPlaySystems(project, containerWidth),
+    () => buildRhythmicTabSystems(project, containerWidth),
     [containerWidth, project],
   )
   const activeSystem =
@@ -220,23 +220,6 @@ export function PlayTab({ project, currentTime, playing, onSeek }: PlayTabProps)
             )
           }
 
-          const notes = system.measures.flatMap((measure) =>
-            measure.notes.map((note) => ({
-              note,
-              x: xForMeasureTime(system, note.audio_onset_s),
-              endX: xForMeasureTime(
-                system,
-                Math.min(system.end_s, note.audio_offset_s),
-              ),
-            })),
-          )
-          const rests = system.measures.flatMap((measure) =>
-            measure.rests.map((rest) => ({
-              id: rest.id,
-              x: xForMeasureTime(system, (rest.start_s + rest.end_s) / 2),
-              value: rest.value,
-            })),
-          )
           const playheadX = active ? xForMeasureTime(system, currentTime) : null
           return (
             <section
@@ -266,27 +249,14 @@ export function PlayTab({ project, currentTime, playing, onSeek }: PlayTabProps)
                     onBoundaryMove={() => undefined}
                     onAddAtPlayhead={() => undefined}
                   />
-                  <TablatureStaff
-                  width={system.width}
-                  labels={labels}
-                  measures={system.measures.map((measure) => ({
-                    number: measure.number,
-                    x: measure.x,
-                  }))}
-                  notes={notes}
-                  rests={rests}
-                  currentTime={currentTime}
-                  playheadX={playheadX}
-                  ariaLabel={`${labels.length}-string read-only tablature for ${project.title}, bars ${system.measures[0].number} through ${system.measures.at(-1)!.number}`}
-                  description="Click a note or anywhere on the staff to jump playback. Notes cannot be edited in Play mode."
-                  onNoteActivate={(note) => onSeek(note.audio_onset_s)}
-                  onBackgroundClick={(event) => {
-                    const bounds = event.currentTarget.getBoundingClientRect()
-                    const localX =
-                      (event.clientX - bounds.left) *
-                      (system.width / Math.max(1, bounds.width))
-                    onSeek(timeForSystemX(system, localX))
-                  }}
+                  <RhythmicTabStaff
+                    system={system}
+                    labels={labels}
+                    currentTime={currentTime}
+                    playheadX={playheadX}
+                    onSeek={onSeek}
+                    timeSignature={project.tab.time_signature}
+                    ticksPerQuarter={project.tab.ticks_per_quarter}
                   />
                 </div>
               </div>

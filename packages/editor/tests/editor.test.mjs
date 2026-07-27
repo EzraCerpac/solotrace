@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'vitest'
 
 import {
@@ -66,7 +67,9 @@ const project = (notes = [note('a', 64, 0), note('b', 67, 0.5)]) => ({
       tempo_bpm: 92,
       time_signature: [4, 4],
       tuning: [40, 45, 50, 55, 59, 64],
+      capo_fret: 0,
       fret_count: 22,
+      preferred_fret: null,
       sync_anchors: [{ audio_frame: 0, score_tick: 0 }],
       notes,
       chords: emptyChordTrack(),
@@ -286,6 +289,27 @@ test('MIDI encodes a compound 6/8 time signature exactly', () => {
   )
 })
 
+test('TypeScript matches the shared fingering parity fixture', () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL('../../../tests/fixtures/fingering-parity.json', import.meta.url), 'utf8'),
+  )
+  const phrase = fixture.pitches.map((pitch, index) =>
+    note(`parity-${index}`, pitch, index * 0.25),
+  )
+  for (const [mode, expected] of Object.entries(fixture.expected)) {
+    const arranged = assignFingerings(
+      phrase,
+      fixture.tuning,
+      fixture.fret_count,
+      mode,
+    )
+    assert.deepEqual(
+      arranged.map((event) => [event.string, event.fret]),
+      expected,
+    )
+  }
+})
+
 test('MusicXML splits cross-measure notes and rejects overlap', () => {
   const crossing = project([
     note('crossing', 64, 0, { score_tick: 1_300, duration_ticks: 3_000 }),
@@ -301,4 +325,19 @@ test('MusicXML splits cross-measure notes and rejects overlap', () => {
     note('b', 67, 0.2, { score_tick: 240, duration_ticks: 480 }),
   ])
   assert.throws(() => musicXml(overlapping), /monophonic/)
+})
+
+test('legacy editor documents migrate capo defaults and MusicXML exports capo', () => {
+  const legacy = project([
+    note('a', 64, 0),
+    note('b', 67, 0.5, { string: 1, fret: 3 }),
+  ])
+  delete activeVersion(legacy).tab.capo_fret
+  delete activeVersion(legacy).tab.preferred_fret
+  assert.equal(isEditorProject(legacy), true)
+  assert.equal(activeVersion(legacy).tab.capo_fret, 0)
+
+  activeVersion(legacy).tab.capo_fret = 2
+  const xml = musicXml(legacy)
+  assert.match(xml, /<capo>2<\/capo>/)
 })

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import threading
+import time
 from xml.etree import ElementTree as ET
 
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-
 from solotrace.api import app
 from solotrace.chords import (
     CONFIG_SHA256,
     MODEL_REVISION,
     MODEL_SHA256,
+    ChordRecognitionCancelled,
+    _chunk_predictions,
     _session,
     model_config,
     normalize_edited_chords,
@@ -18,7 +21,8 @@ from solotrace.chords import (
 )
 from solotrace.demo import DEMO_ID, ensure_demo
 from solotrace.exports import musicxml
-from solotrace.models import ChordEvent, ChordTrack, SpelledPitch
+from solotrace.models import ChordEvent, ChordTrack, RunState, SpelledPitch
+from solotrace.pipeline import Pipeline
 from solotrace.storage import ProjectStore
 
 
@@ -71,6 +75,48 @@ def test_pinned_chordmini_configuration_and_zero_input_parity() -> None:
         rtol=0,
         atol=1e-5,
     )
+
+
+def test_chunk_stitching_keeps_one_ordered_copy_of_overlap_frames(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    sample_rate = 22_050
+    hop_length = 2_048
+    load_ranges: list[tuple[float, float]] = []
+
+    def fake_load(_path, *, offset, duration, **_kwargs):
+        load_ranges.append((offset, duration))
+        return np.zeros(round(duration * sample_rate), dtype=np.float32), sample_rate
+
+    def fake_cqt(audio, **_kwargs):
+        frame_count = max(1, 1 + len(audio) // hop_length)
+        return np.zeros((144, frame_count), dtype=np.complex64)
+
+    monkeypatch.setattr("solotrace.chords.CHUNK_SECONDS", 15)
+    monkeypatch.setattr("solotrace.chords.librosa.load", fake_load)
+    monkeypatch.setattr("solotrace.chords.librosa.cqt", fake_cqt)
+    monkeypatch.setattr(
+        "solotrace.chords._infer_features",
+        lambda features: np.zeros((len(features), 170), dtype=np.float32),
+    )
+
+    times, logits = _chunk_predictions(
+        tmp_path / "unused.wav",
+        0,
+        35,
+        cancelled=lambda: False,
+    )
+
+    assert len(load_ranges) == 3
+    assert load_ranges[1][0] < 15
+    assert load_ranges[2][0] < 30
+    assert logits.shape == (len(times), 170)
+    assert np.all(np.diff(times) > 0)
+    assert len(times) == len(np.unique(times))
+    assert times[0] == pytest.approx(0)
+    assert times[-1] <= 35
+    assert np.max(np.diff(times)) <= hop_length / sample_rate * 1.01
 
 
 def test_chord_normalization_rebuilds_dual_clock_and_requires_contiguous_spans(
@@ -158,3 +204,89 @@ def test_chord_patch_is_revision_protected_and_keeps_notes(tmp_path, monkeypatch
             json={"expected_revision": project["revision"], "track": track},
         )
         assert stale.status_code == 409
+
+
+def test_cancelled_chord_analysis_never_publishes_partial_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = ProjectStore(tmp_path)
+    original = ensure_demo(store)
+    entered = threading.Event()
+
+    def wait_for_cancellation(*_args, cancelled, **_kwargs):
+        entered.set()
+        while not cancelled():
+            time.sleep(0.005)
+        raise ChordRecognitionCancelled("Chord recognition cancelled")
+
+    monkeypatch.setattr(
+        "solotrace.pipeline.recognition_capability",
+        lambda: {"available": True, "detail": "test"},
+    )
+    monkeypatch.setattr("solotrace.pipeline.recognize_chords", wait_for_cancellation)
+    pipeline = Pipeline(store)
+    pipeline.start_chords(
+        DEMO_ID,
+        original.active_version_id,
+        start_s=original.passage.start_s,
+        end_s=original.passage.end_s,
+        expected_revision=original.revision,
+    )
+    assert entered.wait(timeout=1)
+    pipeline.cancel(DEMO_ID)
+
+    deadline = time.monotonic() + 2
+    finished = store.get(DEMO_ID)
+    while finished is not None and finished.run.state in {
+        RunState.queued,
+        RunState.running,
+    }:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+        finished = store.get(DEMO_ID)
+    pipeline.close()
+
+    assert finished is not None
+    assert finished.run.state == RunState.cancelled
+    assert len(finished.versions) == len(original.versions)
+
+
+def test_failed_chord_analysis_never_publishes_partial_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = ProjectStore(tmp_path)
+    original = ensure_demo(store)
+    monkeypatch.setattr(
+        "solotrace.pipeline.recognition_capability",
+        lambda: {"available": True, "detail": "test"},
+    )
+    monkeypatch.setattr(
+        "solotrace.pipeline.recognize_chords",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("bad chord data")),
+    )
+    pipeline = Pipeline(store)
+    pipeline.start_chords(
+        DEMO_ID,
+        original.active_version_id,
+        start_s=original.passage.start_s,
+        end_s=original.passage.end_s,
+        expected_revision=original.revision,
+    )
+
+    deadline = time.monotonic() + 2
+    finished = store.get(DEMO_ID)
+    while finished is not None and finished.run.state in {
+        RunState.queued,
+        RunState.running,
+    }:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+        finished = store.get(DEMO_ID)
+    pipeline.close()
+
+    assert finished is not None
+    assert finished.run.state == RunState.failed
+    assert finished.run.error == "bad chord data"
+    assert len(finished.versions) == len(original.versions)

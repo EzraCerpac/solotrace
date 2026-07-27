@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from solotrace.api import app
 from solotrace.demo import DEMO_ID
 from solotrace.fingering import legal_fingerings
-from solotrace.models import ProcessRequest
+from solotrace.models import ProcessRequest, TabDocument
 
 
 def test_health_and_demo_project_are_ready_without_accounts(tmp_path, monkeypatch) -> None:
@@ -53,6 +53,34 @@ def test_offline_process_range_has_no_draft_cap_but_mvsep_keeps_service_limit() 
             engine="mvsep",
             cloud_consent=True,
         )
+
+
+def test_six_string_profile_uses_uncapoed_tuning_and_migrates_legacy_tabs() -> None:
+    profile = ProcessRequest(
+        start_s=0,
+        end_s=10,
+        expected_revision=1,
+        tuning=[38, 45, 50, 55, 59, 64],
+        capo_fret=2,
+        fret_count=24,
+        preferred_fret=7,
+    )
+    assert profile.tuning[0] == 38
+    tab = TabDocument(
+        sample_rate=44_100,
+        tuning=profile.tuning,
+        capo_fret=profile.capo_fret,
+        fret_count=profile.fret_count,
+        preferred_fret=profile.preferred_fret,
+    )
+    assert tab.sounding_tuning[0] == 40
+    assert tab.available_fret_count == 22
+
+    legacy = TabDocument.model_validate(
+        {"sample_rate": 44_100, "tuning": [40, 45, 50, 55, 59, 64], "fret_count": 22}
+    )
+    assert legacy.capo_fret == 0
+    assert legacy.preferred_fret is None
 
 
 def test_mvsep_token_endpoint_stores_secret_without_returning_it(

@@ -39,8 +39,13 @@ datas = [
     (str(BUILD_METADATA), "."),
 ]
 binaries = []
-hiddenimports = ["solotrace.api", "solotrace.basic_pitch_worker", "solotrace.self_test"]
-for package in ("basic_pitch", "coremltools", "keyring", "onnxruntime", "webview"):
+hiddenimports = [
+    "solotrace.api",
+    "solotrace.basic_pitch_worker",
+    "solotrace.self_test",
+    "onnxruntime",
+]
+for package in ("basic_pitch", "coremltools", "keyring", "webview"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
     datas.extend(item for item in package_datas if not is_test_artifact(item[1]))
     binaries.extend(item for item in package_binaries if not is_test_artifact(item[1]))

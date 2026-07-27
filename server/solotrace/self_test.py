@@ -20,6 +20,11 @@ def run() -> None:
     assert ffmpeg_available()
     Model(ICASSP_2022_MODEL_PATH)
 
+    from .chords import _session, recognition_capability
+
+    assert recognition_capability()["available"]
+    assert _session().get_inputs()[0].shape[-2:] == [108, 144]
+
     from .api import app
 
     with TestClient(app) as client:

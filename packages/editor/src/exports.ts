@@ -1,4 +1,5 @@
 import { activeVersion } from './versions'
+import { soundingTuning } from './instrument'
 import {
   connectedTechnique,
   validateConnectedTechniqueFingerings,
@@ -85,7 +86,7 @@ export function asciiTab(project: EditorProject, width = 72): string {
     })
   })
 
-  const labels = [...tab.tuning]
+  const labels = soundingTuning(tab)
     .reverse()
     .map((openPitch, index) => ({ string: index + 1, label: pitchName(openPitch) }))
   const result = [`${project.title} — ${project.passage.name}`, '']
@@ -319,6 +320,7 @@ export function musicXml(project: EditorProject): string {
         '      <staff-details>',
         `        <staff-lines>${tab.tuning.length}</staff-lines>`,
       )
+      if (tab.capo_fret) lines.push(`        <capo>${tab.capo_fret}</capo>`)
       tab.tuning.forEach((openPitch, index) => {
         const [step, alter, octave] = pitchParts(openPitch)
         lines.push(

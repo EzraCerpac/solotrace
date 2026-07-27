@@ -25,6 +25,8 @@ import { UploadDialog } from './components/UploadDialog'
 import { VersionDialog } from './components/VersionDialog'
 import { Waveform } from './components/Waveform'
 import { formatTime, minimumConfidence, pitchName } from './music'
+import { audioFrameToScoreTick } from './music'
+import { legalFingerings, soundingTuning, availableFretCount } from '@solotrace/editor'
 import type {
   AssetRole,
   Capabilities,
@@ -80,11 +82,45 @@ function summaryFromProject(project: Project): ProjectSummary {
   }
 }
 
+interface ReviewItem {
+  id: string
+  kind: 'note' | 'chord'
+  time: number
+}
+
+function reviewItemsForProject(project: Project): ReviewItem[] {
+  return [
+    ...project.tab.notes
+      .filter(
+        (note) => !note.reviewed && minimumConfidence(note.confidence) < 0.72,
+      )
+      .map((note) => ({
+        id: note.id,
+        kind: 'note' as const,
+        time: note.audio_onset_s,
+      })),
+    ...project.tab.chords.events
+      .filter((chord) => !chord.reviewed)
+      .map((chord) => ({
+        id: chord.id,
+        kind: 'chord' as const,
+        time: chord.audio_onset_s,
+      })),
+  ].sort((left, right) => left.time - right.time)
+}
+
 interface WorkspacePreferences {
   track: AssetRole
   speed: number
   loop: boolean
   draftScope: DraftScope
+}
+
+interface InstrumentProfile {
+  tuning: number[]
+  capoFret: number
+  fretCount: number
+  preferredFret: number | null
 }
 
 function preferenceKey(projectId: string): string {
@@ -105,6 +141,8 @@ function App() {
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const bundleInputRef = useRef<HTMLInputElement>(null)
   const savingRef = useRef(false)
+  const undoStackRef = useRef<NoteEvent[][]>([])
+  const redoStackRef = useRef<NoteEvent[][]>([])
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [trashedProjects, setTrashedProjects] = useState<ProjectSummary[]>([])
@@ -130,6 +168,7 @@ function App() {
   const [railOpen, setRailOpen] = useState(false)
   const [mobileLayout, setMobileLayout] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [historyVersion, setHistoryVersion] = useState(0)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [undoDelete, setUndoDelete] = useState<{
@@ -141,6 +180,13 @@ function App() {
   const [fullscreen, setFullscreen] = useState(false)
   const [chordUndo, setChordUndo] = useState<ChordTrack[]>([])
   const [chordRedo, setChordRedo] = useState<ChordTrack[]>([])
+  const [reviewMode, setReviewMode] = useState(false)
+  const [instrumentProfile, setInstrumentProfile] = useState<InstrumentProfile>({
+    tuning: [40, 45, 50, 55, 59, 64],
+    capoFret: 0,
+    fretCount: 22,
+    preferredFret: null,
+  })
 
   const loadInitial = useCallback(async () => {
     setLoading(true)
@@ -223,7 +269,13 @@ function App() {
         const next = await api.getProject(project.id)
         if (cancelled) return
         retryDelay = 800
-        setProject(next)
+        if (!savingRef.current) {
+          setProject((current) =>
+            current && current.id === next.id && current.revision > next.revision
+              ? current
+              : next,
+          )
+        }
         setProjects((current) =>
           current.map((candidate) =>
             candidate.id === next.id ? summaryFromProject(next) : candidate,
@@ -262,6 +314,19 @@ function App() {
     assets.find((asset) => asset.role === track) ??
     assets.find((asset) => asset.role === 'original') ??
     null
+
+  useEffect(() => {
+    if (!project) return
+    setInstrumentProfile({
+      tuning: [...project.tab.tuning],
+      capoFret: project.tab.capo_fret,
+      fretCount: project.tab.fret_count,
+      preferredFret: project.tab.preferred_fret,
+    })
+    undoStackRef.current = []
+    redoStackRef.current = []
+    setHistoryVersion((value) => value + 1)
+  }, [project?.id, project?.active_version_id])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -370,6 +435,18 @@ function App() {
     project?.tab.chords.events.find((chord) => chord.id === selectedChordId) ?? null
   const selectedChordIndex =
     project?.tab.chords.events.findIndex((chord) => chord.id === selectedChordId) ?? -1
+  const reviewSelection = selectedChord ?? selectedNote
+  const playbackLoopStart =
+    reviewMode && reviewSelection
+      ? Math.max(0, reviewSelection.audio_onset_s - 0.75)
+      : passage?.start_s ?? 0
+  const playbackLoopEnd =
+    reviewMode && reviewSelection
+      ? Math.min(
+          project?.duration_s ?? reviewSelection.audio_offset_s,
+          reviewSelection.audio_offset_s + 0.75,
+        )
+      : passage?.end_s ?? project?.duration_s ?? 0
   const uncertainNotes = useMemo(
     () =>
       project?.tab.notes
@@ -380,22 +457,8 @@ function App() {
     [project],
   )
   const reviewItems = useMemo(
-    () =>
-      [
-        ...uncertainNotes.map((note) => ({
-          id: note.id,
-          kind: 'note' as const,
-          time: note.audio_onset_s,
-        })),
-        ...(project?.tab.chords.events
-          .filter((chord) => !chord.reviewed)
-          .map((chord) => ({
-            id: chord.id,
-            kind: 'chord' as const,
-            time: chord.audio_onset_s,
-          })) ?? []),
-      ].sort((left, right) => left.time - right.time),
-    [project, uncertainNotes],
+    () => (project ? reviewItemsForProject(project) : []),
+    [project],
   )
   const selectedStart = draftScope === 'whole' ? 0 : passage?.start_s ?? 0
   const selectedEnd = draftScope === 'whole' ? project?.duration_s ?? 0 : passage?.end_s ?? 0
@@ -442,6 +505,7 @@ function App() {
   const saveNotes = async (
     notes: NoteEvent[],
     message: string,
+    recordHistory = true,
   ): Promise<Project | null> => {
     if (viewMode !== 'edit' || !project || savingRef.current) return null
     const previous = project
@@ -463,6 +527,11 @@ function App() {
         }),
       )
       adoptProject(updated, false)
+      if (recordHistory) {
+        undoStackRef.current.push(previous.tab.notes)
+        redoStackRef.current = []
+        setHistoryVersion((value) => value + 1)
+      }
       setNotice(message)
       return updated
     } catch (saveError) {
@@ -536,7 +605,7 @@ function App() {
     }
   }
 
-  const selectReviewItem = (item: (typeof reviewItems)[number] | undefined) => {
+  const selectReviewItem = (item: ReviewItem | undefined) => {
     if (!item) return
     if (item.kind === 'note') {
       setSelectedChordId(null)
@@ -548,8 +617,19 @@ function App() {
     seek(item.time)
   }
 
-  const selectNextReviewAt = (time: number) => {
-    const next = reviewItems.find((item) => item.time > time + 0.0001) ?? reviewItems[0]
+  const selectNextReview = (
+    nextProject: Project,
+    previous: { id: string; audio_onset_s: number },
+  ) => {
+    const unresolved = reviewItemsForProject(nextProject)
+    const next =
+      unresolved.find((item) => item.time > previous.audio_onset_s + 0.0001) ??
+      unresolved[0]
+    if (!next) {
+      setSelectedNoteId(null)
+      setSelectedChordId(null)
+      return
+    }
     selectReviewItem(next)
   }
 
@@ -637,7 +717,7 @@ function App() {
       }
       const reviewed = setChordReviewed(track, selectedChord.id, true)
       void saveChords(reviewed, 'Chord changes saved').then((updated) => {
-        if (updated) selectNextReviewAt(selectedChord.audio_onset_s)
+        if (updated) selectNextReview(updated, selectedChord)
       })
     } catch (chordError) {
       setError(chordError instanceof Error ? chordError.message : 'Could not edit chord')
@@ -649,7 +729,7 @@ function App() {
     const track = setChordReviewed(project.tab.chords, selectedChord.id, reviewed)
     void saveChords(track, reviewed ? 'Chord accepted' : 'Chord returned to review').then(
       (updated) => {
-        if (updated && reviewed) selectNextReviewAt(selectedChord.audio_onset_s)
+        if (updated && reviewed) selectNextReview(updated, selectedChord)
       },
     )
   }
@@ -737,7 +817,7 @@ function App() {
             ...note,
             string: fingering.string,
             fret: fingering.fret,
-            user_locked: false,
+            user_locked: true,
             reviewed: true,
             confidence: { ...note.confidence, fingering: 1 },
           }
@@ -746,25 +826,87 @@ function App() {
     void saveNotes(notes, `Moved note to string ${fingering.string}, fret ${fingering.fret}`)
   }
 
+  const undoNoteMutation = async () => {
+    if (!project || savingRef.current) return
+    const target = undoStackRef.current.pop()
+    if (!target) return
+    const current = project.tab.notes
+    const updated = await saveNotes(target, 'Undid note change', false)
+    if (updated) {
+      redoStackRef.current.push(current)
+    } else {
+      undoStackRef.current.push(target)
+    }
+    setHistoryVersion((value) => value + 1)
+  }
+
+  const redoNoteMutation = async () => {
+    if (!project || savingRef.current) return
+    const target = redoStackRef.current.pop()
+    if (!target) return
+    const current = project.tab.notes
+    const updated = await saveNotes(target, 'Redid note change', false)
+    if (updated) {
+      undoStackRef.current.push(current)
+    } else {
+      redoStackRef.current.push(target)
+    }
+    setHistoryVersion((value) => value + 1)
+  }
+
+  const addNoteAtPlayhead = () => {
+    if (!project || savingRef.current) return
+    const start = Math.max(project.passage.start_s, Math.min(currentTime, project.passage.end_s - 0.01))
+    const beatSeconds = 60 / project.tab.tempo_bpm
+    const nextOnset = project.tab.notes
+      .filter((note) => note.audio_onset_s > start)
+      .sort((left, right) => left.audio_onset_s - right.audio_onset_s)[0]?.audio_onset_s
+    const end = Math.min(start + beatSeconds, nextOnset ?? Number.POSITIVE_INFINITY, project.passage.end_s)
+    const relativeFret = project.tab.preferred_fret ?? 0
+    const string = 1
+    const tuning = soundingTuning(project.tab)
+    const midiPitch = tuning.at(-1)! + relativeFret
+    const alternatives = legalFingerings(
+      midiPitch,
+      tuning,
+      availableFretCount(project.tab),
+    )
+    const chosen = alternatives.find((candidate) => candidate.string === string) ?? alternatives[0]
+    const onsetFrame = Math.round(start * project.tab.sample_rate)
+    const endFrame = Math.max(onsetFrame + 1, Math.round(end * project.tab.sample_rate))
+    const scoreTick = audioFrameToScoreTick(onsetFrame, project.tab.sync_anchors)
+    const note: NoteEvent = {
+      id: `note-manual-${crypto.randomUUID()}`,
+      onset_frame: onsetFrame,
+      end_frame: endFrame,
+      audio_onset_s: start,
+      audio_offset_s: end,
+      score_tick: scoreTick,
+      duration_ticks: project.tab.ticks_per_quarter,
+      midi_pitch: midiPitch,
+      pitch_curve_cents: [],
+      string: chosen.string,
+      fret: chosen.fret,
+      techniques: [],
+      confidence: { pitch: 1, onset: 1, fingering: 1, technique: 1 },
+      alternatives,
+      user_locked: true,
+      reviewed: true,
+    }
+    const notes = [...project.tab.notes, note].sort(
+      (left, right) => left.audio_onset_s - right.audio_onset_s || left.midi_pitch - right.midi_pitch,
+    )
+    void saveNotes(notes, 'Added note').then((updated) => {
+      if (updated) setSelectedNoteId(note.id)
+    })
+  }
+
   const saveSelectedNote = (nextNote: NoteEvent) => {
     if (viewMode !== 'edit' || !project || savingRef.current) return
     const notes = project.tab.notes.map((note) => (note.id === nextNote.id ? nextNote : note))
     void saveNotes(notes, 'Changes saved').then((updated) => {
       if (updated) selectNextReview(updated, nextNote)
     })
-  }
-
-  const selectNextReview = (nextProject: Project, previous: NoteEvent) => {
-    const unresolved = nextProject.tab.notes
-      .filter(
-        (note) => !note.reviewed && minimumConfidence(note.confidence) < 0.72,
-      )
-      .sort((left, right) => left.audio_onset_s - right.audio_onset_s)
-    const next =
-      unresolved.find((note) => note.audio_onset_s > previous.audio_onset_s) ??
-      unresolved[0]
-    setSelectedNoteId(next?.id ?? null)
-    if (next) seek(next.audio_onset_s)
   }
 
   const acceptNote = (note: NoteEvent) => {
@@ -841,8 +983,10 @@ function App() {
       const next = await api.processProject(
         project.id,
         selectedPassage,
-        project.tab.tuning,
-        project.tab.fret_count,
+        instrumentProfile.tuning,
+        instrumentProfile.capoFret,
+        instrumentProfile.fretCount,
+        instrumentProfile.preferredFret,
         project.revision,
         engine,
         engine === 'mvsep' && cloudConsent,
@@ -884,7 +1028,10 @@ function App() {
     }
   }
 
-  const refinger = async (mode: FingeringMode) => {
+  const refinger = async (
+    mode: FingeringMode,
+    lockPolicy: 'preserve' | 'clear' = 'preserve',
+  ) => {
     if (viewMode !== 'edit' || !project || savingRef.current) return
     savingRef.current = true
     setSaving(true)
@@ -895,11 +1042,15 @@ function App() {
           expectedRevision: project.revision,
           sourceVersionId: project.active_version_id,
           mode,
+          lockPolicy,
         }),
       )
       adoptProject(next, false)
       setSelectedNoteId(null)
       setNotice(
+        lockPolicy === 'clear'
+          ? 'Started fresh in a new version'
+          :
         mode === 'easiest'
           ? 'Created Easiest version'
           : mode === 'position'
@@ -1392,8 +1543,8 @@ function App() {
             duration={project.duration_s}
             speed={speed}
             loop={loop}
-            loopStart={passage.start_s}
-            loopEnd={passage.end_s}
+            loopStart={playbackLoopStart}
+            loopEnd={playbackLoopEnd}
             track={track}
             availableTracks={assets.map((asset) => asset.role)}
             onTrack={switchTrack}
@@ -1627,9 +1778,110 @@ function App() {
             </div>
           )}
           <div className="rail-group">
-            <p className="rail-label">Tuning</p>
-            <strong>{project.tab.tuning.map(pitchName).join(' · ')}</strong>
-            <span>{project.tab.fret_count} frets</span>
+            <p className="rail-label">Next draft instrument</p>
+            <label className="rail-field">
+              Tuning
+              <select
+                value={
+                  instrumentProfile.tuning.join(',') === '40,45,50,55,59,64'
+                    ? 'standard'
+                    : instrumentProfile.tuning.join(',') === '38,45,50,55,59,64'
+                      ? 'drop-d'
+                      : 'custom'
+                }
+                onChange={(event) => {
+                  if (event.target.value === 'standard') {
+                    setInstrumentProfile((current) => ({
+                      ...current,
+                      tuning: [40, 45, 50, 55, 59, 64],
+                    }))
+                  } else if (event.target.value === 'drop-d') {
+                    setInstrumentProfile((current) => ({
+                      ...current,
+                      tuning: [38, 45, 50, 55, 59, 64],
+                    }))
+                  }
+                }}
+              >
+                <option value="standard">Standard EADGBE</option>
+                <option value="drop-d">Drop D</option>
+                <option value="custom">Custom MIDI</option>
+              </select>
+            </label>
+            <label className="rail-field">
+              Uncapoed open-string MIDI
+              <input
+                key={instrumentProfile.tuning.join(',')}
+                defaultValue={instrumentProfile.tuning.join(' ')}
+                onBlur={(event) => {
+                  const tuning = event.target.value.trim().split(/\s+/).map(Number)
+                  if (
+                    tuning.length === 6 &&
+                    tuning.every(Number.isInteger) &&
+                    tuning.every(
+                      (pitch, index) =>
+                        pitch >= 0 &&
+                        pitch <= 127 &&
+                        (index === 0 || pitch > tuning[index - 1]),
+                    )
+                  ) {
+                    setInstrumentProfile((current) => ({ ...current, tuning }))
+                  }
+                }}
+              />
+            </label>
+            <div className="rail-field-pair">
+              <label className="rail-field">
+                Capo
+                <input
+                  type="number"
+                  min="0"
+                  max="12"
+                  value={instrumentProfile.capoFret}
+                  onChange={(event) =>
+                    setInstrumentProfile((current) => ({
+                      ...current,
+                      capoFret: Number(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+              <label className="rail-field">
+                Total frets
+                <input
+                  type="number"
+                  min="12"
+                  max="36"
+                  value={instrumentProfile.fretCount}
+                  onChange={(event) =>
+                    setInstrumentProfile((current) => ({
+                      ...current,
+                      fretCount: Number(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+            </div>
+            <label className="rail-field">
+              Preferred relative fret
+              <input
+                type="number"
+                min="0"
+                max={instrumentProfile.fretCount - instrumentProfile.capoFret}
+                placeholder="Automatic"
+                value={instrumentProfile.preferredFret ?? ''}
+                onChange={(event) =>
+                  setInstrumentProfile((current) => ({
+                    ...current,
+                    preferredFret:
+                      event.target.value === '' ? null : Number(event.target.value),
+                  }))
+                }
+              />
+            </label>
+            <span>
+              Sounding pitch adds capo. New draft, new version; existing notes stay unchanged.
+            </span>
           </div>
           <div className="rail-group">
             <p className="rail-label">Lead engine</p>
@@ -1707,7 +1959,17 @@ function App() {
             >
               Stay in one position
             </button>
-            <span>Each style creates a new version. Manual fingerings may move.</span>
+            <span>Preserve my edits is on. Each style creates a new version.</span>
+            <button
+              type="button"
+              className="rail-choice danger-text"
+              disabled={saving || !project.tab.notes.length}
+              onClick={() =>
+                void refinger(activeVersion?.fingering_mode ?? 'balanced', 'clear')
+              }
+            >
+              Start fresh
+            </button>
           </div>
           <div className="rail-provenance">
             <p className="rail-label">Draft source</p>
@@ -1768,6 +2030,44 @@ function App() {
             <div className="review-tools">
               <button
                 type="button"
+                className={`button secondary ${reviewMode ? 'active' : ''}`}
+                aria-pressed={reviewMode}
+                onClick={() => {
+                  const nextMode = !reviewMode
+                  setReviewMode(nextMode)
+                  if (nextMode) {
+                    const first = uncertainNotes[0]
+                    if (first) {
+                      setSelectedNoteId(first.id)
+                      seek(Math.max(0, first.audio_onset_s - 0.5))
+                      setLoop(true)
+                      if (assets.some((asset) => asset.role === 'lead')) switchTrack('lead')
+                    }
+                  }
+                }}
+              >
+                Review
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Previous ambiguous note"
+                disabled={!uncertainNotes.length}
+                onClick={() => {
+                  const currentIndex = uncertainNotes.findIndex((note) => note.id === selectedNoteId)
+                  const previous = uncertainNotes[
+                    (currentIndex - 1 + uncertainNotes.length) % uncertainNotes.length
+                  ]
+                  if (previous) {
+                    setSelectedNoteId(previous.id)
+                    seek(Math.max(0, previous.audio_onset_s - 0.5))
+                  }
+                }}
+              >
+                <Icon name="back" />
+              </button>
+              <button
+                type="button"
                 className="review-count"
                 disabled={!reviewItems.length}
                 onClick={() => {
@@ -1798,8 +2098,43 @@ function App() {
                 disabled={!chordRedo.length || saving}
                 onClick={() => void redoChordEdit()}
               >
+                Redo chord
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={saving || !undoStackRef.current.length}
+                onClick={() => void undoNoteMutation()}
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={saving || !redoStackRef.current.length}
+                onClick={() => void redoNoteMutation()}
+              >
                 Redo
               </button>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={saving}
+                onClick={addNoteAtPlayhead}
+              >
+                Add note here
+              </button>
+              <span
+                key={historyVersion}
+                className="review-progress"
+                aria-live="polite"
+              >
+                {project.tab.notes.length -
+                  uncertainNotes.length +
+                  project.tab.chords.events.filter((chord) => chord.reviewed).length}
+                /
+                {project.tab.notes.length + project.tab.chords.events.length} resolved
+              </span>
             </div>
           </section>
 
@@ -1930,6 +2265,8 @@ function App() {
           <NoteInspector
             note={selectedNote}
             saving={saving}
+            rangeStart={project.passage.start_s}
+            rangeEnd={project.passage.end_s}
             onClose={() => setSelectedNoteId(null)}
             onSave={saveSelectedNote}
             onAccept={acceptNote}
@@ -1968,8 +2305,8 @@ function App() {
         duration={project.duration_s}
         speed={speed}
         loop={loop}
-        loopStart={passage.start_s}
-        loopEnd={passage.end_s}
+        loopStart={playbackLoopStart}
+        loopEnd={playbackLoopEnd}
         onTogglePlay={togglePlay}
         onSeek={seek}
         onSpeed={changeSpeed}

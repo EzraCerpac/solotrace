@@ -28,9 +28,16 @@ Evaluated 12 EGSet12 electric-guitar performances against exact per-string JAMS/
 
 ## Decision
 
-Best controlled-mixture route: **demucs-basic-pitch** (note F1 0.666, tab F1 0.218).
+Best controlled-mixture route: **demucs-basic-pitch** (note F1 0.666). Its
+reported **0.218 tab F1 is historical**: that run used the retired greedy
+benchmark helper, not the shipped dynamic-programming solver. Do not use it as
+the current product-path score until the benchmark is rerun.
 
-Tab F1 uses SoloTrace's deterministic fingering for pYIN and Basic Pitch; TabCNN predicts string/fret directly. EGSet12 is isolated guitar, so separation scores use a deterministic full-band backing mixed at 0.9× lead RMS.
+The benchmark now runs the same fingering solver as production, records an
+oracle-pitch fingering score, and writes dataset, configuration, and benchmark
+code SHA-256 hashes into `results.json`. TabCNN predicts string/fret directly.
+EGSet12 is isolated guitar, so separation scores use a deterministic full-band
+backing mixed at 0.9× lead RMS.
 
 Dataset: [EGSet12, CC BY 4.0](https://zenodo.org/records/11406378).
 

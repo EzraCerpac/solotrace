@@ -48,7 +48,6 @@ export interface PlayRestSystem {
 export type PlaySystem = PlayTabSystem | PlayRestSystem
 
 export const PLAY_SIDE = 58
-const MAX_MEASURES_PER_SYSTEM = 4
 const MINIMUM_MEASURE_WIDTH = 220
 
 function restValue(units: number): RestValue {
@@ -243,10 +242,14 @@ function positionMeasures(
   }
 }
 
-export function buildPlaySystems(project: Project, containerWidth: number): PlaySystem[] {
+/** Pure score-tick layout shared by Play rendering and export validation. */
+export function buildRhythmicTabSystems(
+  project: Project,
+  containerWidth: number,
+): PlaySystem[] {
   const measures = buildPlayMeasures(project)
   const safeWidth = Math.max(320, containerWidth)
-  const contentWidth = Math.max(MINIMUM_MEASURE_WIDTH, safeWidth - PLAY_SIDE * 2)
+  const measuresPerSystem = safeWidth < 600 ? 1 : safeWidth < 900 ? 2 : 4
   const systems: PlaySystem[] = []
   let tabRun: PlayMeasure[] = []
   let restRun: PlayMeasure[] = []
@@ -281,13 +284,7 @@ export function buildPlaySystems(project: Project, containerWidth: number): Play
     }
 
     flushRests()
-    const nextWidth =
-      tabRun.reduce((total, item) => total + item.minimum_width, 0) +
-      measure.minimum_width
-    if (
-      tabRun.length >= MAX_MEASURES_PER_SYSTEM ||
-      (tabRun.length > 0 && nextWidth > contentWidth)
-    ) {
+    if (tabRun.length >= measuresPerSystem) {
       flushTabs()
     }
     tabRun.push(measure)
@@ -296,6 +293,9 @@ export function buildPlaySystems(project: Project, containerWidth: number): Play
   flushRests()
   return systems
 }
+
+/** @deprecated Prefer the renderer/export contract name. */
+export const buildPlaySystems = buildRhythmicTabSystems
 
 export function timeForSystemX(system: PlayTabSystem, x: number): number {
   const measure =

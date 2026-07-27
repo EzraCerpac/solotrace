@@ -27,6 +27,22 @@ def _rewrite_project_id(bundle: bytes, project_id: str) -> bytes:
     return output.getvalue()
 
 
+def _rewrite_as_v1_bundle(bundle: bytes) -> bytes:
+    source = zipfile.ZipFile(io.BytesIO(bundle))
+    output = io.BytesIO()
+    with source, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as target:
+        for info in source.infolist():
+            payload = source.read(info)
+            if info.filename.endswith("/project.json"):
+                document = json.loads(payload)
+                document["schemaVersion"] = 1
+                for version in document["project"]["versions"]:
+                    version["tab"].pop("chords", None)
+                payload = json.dumps(document).encode()
+            target.writestr(info.filename, payload)
+    return output.getvalue()
+
+
 def test_bundle_round_trip_and_atomic_permanent_deletion(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path / "data"))
     with TestClient(app) as client:
@@ -70,6 +86,28 @@ def test_bundle_round_trip_and_atomic_permanent_deletion(tmp_path, monkeypatch) 
         assert not (
             tmp_path / "data" / "projects" / imported["id"]
         ).exists()
+
+
+def test_v1_bundle_import_injects_empty_chord_tracks(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path / "data"))
+    with TestClient(app) as client:
+        bundle = client.get(f"/api/projects/{DEMO_ID}/export/bundle")
+        assert bundle.status_code == 200
+        response = client.post(
+            "/api/projects/import",
+            files={
+                "file": (
+                    "legacy.solotrace.zip",
+                    _rewrite_as_v1_bundle(bundle.content),
+                    "application/zip",
+                )
+            },
+        )
+
+    assert response.status_code == 201
+    imported = response.json()
+    assert imported["tab"]["chords"]["engine"] == "manual"
+    assert imported["tab"]["chords"]["events"] == []
 
 
 def test_corrupt_bundle_leaves_library_untouched(tmp_path, monkeypatch) -> None:

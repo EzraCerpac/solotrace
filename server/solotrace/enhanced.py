@@ -47,6 +47,7 @@ def tab_from_basic_pitch_events(
     sample_rate: int,
     tuning: list[int],
     fret_count: int,
+    preferred_fret: int | None = None,
 ) -> TabDocument:
     tempo, anchors = build_rhythm_map(
         rhythm_path,
@@ -113,7 +114,12 @@ def tab_from_basic_pitch_events(
         tuning=tuning,
         fret_count=fret_count,
         sync_anchors=anchors,
-        notes=assign_fingerings(notes, tuning, fret_count),
+        notes=assign_fingerings(
+            notes,
+            tuning,
+            fret_count,
+            preferred_fret=preferred_fret,
+        ),
     )
 
 
@@ -128,6 +134,7 @@ def transcribe_basic_pitch(
     workspace: Path,
     worker_command: tuple[str, ...],
     worker_script: Path,
+    preferred_fret: int | None = None,
 ) -> TabDocument:
     segment_path = workspace / "basic-pitch-input.wav"
     with sf.SoundFile(lead_path) as source:
@@ -185,4 +192,5 @@ def transcribe_basic_pitch(
         sample_rate,
         tuning,
         fret_count,
+        preferred_fret,
     )

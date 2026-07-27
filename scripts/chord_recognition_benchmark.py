@@ -196,7 +196,11 @@ def _coverage(intervals: np.ndarray, labels: list[str]) -> float:
 
 
 def _distribution(values: list[float]) -> dict[str, float]:
-    quartiles = statistics.quantiles(values, n=4, method="inclusive")
+    quartiles = (
+        statistics.quantiles(values, n=4, method="inclusive")
+        if len(values) > 1
+        else [values[0], values[0], values[0]]
+    )
     return {
         "min": min(values),
         "q1": quartiles[0],

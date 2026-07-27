@@ -352,6 +352,7 @@ export function SavedProjectStudio({ id }: SavedProjectStudioProps) {
         versionId: `saved-${mode}-revision-${project.revision + 1}`,
         name: humanMode(mode),
         createdAt: now,
+        lockPolicy: "preserve",
       });
       setProject(next);
       setSelectedNoteId(activeVersion(next).tab.notes[0]?.id ?? null);

@@ -89,6 +89,38 @@ function normalizeSavedProject(record: SavedProjectRecord): EditorProject {
   };
 }
 
+function restoreExampleChords(
+  draft: EditorProject,
+  base: EditorProject,
+): EditorProject {
+  const baseById = new Map(base.versions.map((version) => [version.id, version]));
+  const fallback = baseById.get(base.active_version_id);
+  let changed = false;
+  const versions = draft.versions.map((version) => {
+    const track = version.tab.chords;
+    const isLegacyEmptyTrack =
+      track.engine === "manual" &&
+      track.model_revision === null &&
+      track.model_sha256 === null &&
+      track.analyzed_start_s === null &&
+      track.analyzed_end_s === null &&
+      track.events.length === 0;
+    const source = baseById.get(version.id) ?? fallback;
+    if (!isLegacyEmptyTrack || !source || source.tab.chords.events.length === 0) {
+      return version;
+    }
+    changed = true;
+    return {
+      ...version,
+      tab: {
+        ...version.tab,
+        chords: structuredClone(source.tab.chords),
+      },
+    };
+  });
+  return changed ? { ...draft, versions } : draft;
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as T & ApiErrorBody;
   if (!response.ok) {
@@ -181,6 +213,7 @@ export class HostedEditorClient implements EditorClientAdapter {
       versionId: nextVersionId(project, request.sourceVersionId, request.mode),
       name: request.name?.trim() || humanMode(request.mode),
       createdAt: this.#now(),
+      lockPolicy: request.lockPolicy,
     });
     return this.#persistMutation(updated, request.expectedRevision);
   }
@@ -210,7 +243,7 @@ export class HostedEditorClient implements EditorClientAdapter {
   async #loadExample(slug: string, reset = false): Promise<EditorProject> {
     const response = await this.#fetch(
       `/examples/${encodeURIComponent(slug)}/project.json`,
-      { cache: "force-cache" },
+      { cache: "no-cache" },
     );
     const raw: unknown = await parseResponse<unknown>(response);
     if (!isEditorProject(raw)) throw new Error("The example contains an invalid editor document");
@@ -230,7 +263,7 @@ export class HostedEditorClient implements EditorClientAdapter {
         draft.origin === "example" &&
         draft.example_slug === slug
       ) {
-        return this.#remember(draft);
+        return this.#remember(restoreExampleChords(draft, base));
       }
     } catch {
       // A malformed device draft is disposable; the immutable base stays safe.

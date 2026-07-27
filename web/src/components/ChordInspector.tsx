@@ -23,6 +23,31 @@ interface ChordInspectorProps {
   onDelete: () => void
 }
 
+const QUALITY_SUFFIX: Record<ChordQuality, string> = {
+  min: 'm',
+  maj: '',
+  dim: 'dim',
+  aug: 'aug',
+  min6: 'm6',
+  maj6: '6',
+  min7: 'm7',
+  minmaj7: 'm(maj7)',
+  maj7: 'maj7',
+  '7': '7',
+  dim7: 'dim7',
+  hdim7: 'm7b5',
+  sus2: 'sus2',
+  sus4: 'sus4',
+}
+
+function spelledPitch(pitch: NonNullable<ChordEvent['root']>): string {
+  const accidental = ({ [-2]: 'bb', [-1]: 'b', [0]: '', [1]: '#', [2]: '##' } as Record<
+    number,
+    string
+  >)[pitch.alter]
+  return `${pitch.step}${accidental ?? ''}`
+}
+
 export function ChordInspector({
   chord,
   index,
@@ -52,9 +77,8 @@ export function ChordInspector({
     onSave(symbol, start, end)
   }
 
-  const root = chord.root
-    ? `${chord.root.step}${({ [-1]: 'b', [0]: '', [1]: '#' } as Record<number, string>)[chord.root.alter] ?? ''}`
-    : 'C'
+  const root = chord.root ? spelledPitch(chord.root) : 'C'
+  const bass = chord.bass ? `/${spelledPitch(chord.bass)}` : ''
 
   return (
     <aside className="note-inspector chord-inspector" aria-label="Selected chord">
@@ -103,7 +127,11 @@ export function ChordInspector({
                 onChange={(event) => {
                   if (event.target.value === 'no-chord') setSymbol('N.C.')
                   else if (event.target.value === 'unknown') setSymbol('X')
-                  else setSymbol(`${event.target.value}${chord.quality === 'maj' ? '' : chord.quality ?? ''}`)
+                  else {
+                    setSymbol(
+                      `${event.target.value}${QUALITY_SUFFIX[chord.quality ?? 'maj']}${bass}`,
+                    )
+                  }
                 }}
               >
                 {['C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'].map(
@@ -120,12 +148,7 @@ export function ChordInspector({
                 value={chord.quality ?? 'maj'}
                 onChange={(event) => {
                   const quality = event.target.value as ChordQuality
-                  const suffix: Record<ChordQuality, string> = {
-                    min: 'm', maj: '', dim: 'dim', aug: 'aug', min6: 'm6', maj6: '6',
-                    min7: 'm7', minmaj7: 'm(maj7)', maj7: 'maj7', '7': '7',
-                    dim7: 'dim7', hdim7: 'm7b5', sus2: 'sus2', sus4: 'sus4',
-                  }
-                  setSymbol(`${root}${suffix[quality]}${chord.bass ? `/${chord.bass.step}` : ''}`)
+                  setSymbol(`${root}${QUALITY_SUFFIX[quality]}${bass}`)
                 }}
               >
                 {CHORD_QUALITIES.map((quality) => <option key={quality}>{quality}</option>)}

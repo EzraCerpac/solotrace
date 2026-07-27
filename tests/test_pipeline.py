@@ -147,3 +147,65 @@ def test_mvsep_pipeline_records_honest_provenance(tmp_path, monkeypatch) -> None
     assert finished.asset("lead").method == "MVSep one-stage lead-guitar estimate"
     assert any("MVSep" in item for item in finished.provenance)
     assert any("Basic Pitch" in item for item in finished.provenance)
+
+
+def test_offline_preview_prefers_basic_pitch_and_records_actual_route(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = ProjectStore(tmp_path / "data")
+    project = ensure_demo(store)
+    worker_dir = tmp_path / "workers"
+    basic_pitch = worker_dir / "transcribe" / "bin" / "python"
+    basic_pitch.parent.mkdir(parents=True)
+    basic_pitch.touch()
+    settings = Settings(
+        root_dir=tmp_path,
+        data_dir=tmp_path / "data",
+        web_dist=tmp_path,
+        worker_dir=worker_dir,
+        max_upload_bytes=1_000_000,
+        mvsep_api_token=None,
+        mvsep_api_base_url="https://de.mvsep.com/api",
+        mvsep_poll_seconds=0,
+        mvsep_timeout_seconds=60,
+    )
+
+    def fake_stems(original, lead, backing, *_args, **_kwargs):
+        shutil.copyfile(original, lead)
+        shutil.copyfile(original, backing)
+        info = sf.info(original)
+        return info.samplerate, info.duration
+
+    def fake_basic(*_args, **_kwargs) -> TabDocument:
+        return project.tab
+
+    monkeypatch.setattr("solotrace.pipeline.create_preview_stems", fake_stems)
+    monkeypatch.setattr("solotrace.pipeline.transcribe_basic_pitch", fake_basic)
+    monkeypatch.setattr(
+        "solotrace.pipeline.transcribe_pyin",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("pYIN should only be the fallback")
+        ),
+    )
+    pipeline = Pipeline(store, settings)
+    pipeline.start(
+        DEMO_ID,
+        start_s=0,
+        end_s=project.duration_s,
+        tuning=project.tab.tuning,
+        fret_count=project.tab.fret_count,
+        expected_revision=project.revision,
+    )
+
+    deadline = time.monotonic() + 2
+    finished = store.get(DEMO_ID)
+    while finished is not None and finished.run.state in {RunState.queued, RunState.running}:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+        finished = store.get(DEMO_ID)
+    pipeline.close()
+
+    assert finished is not None
+    assert finished.run.state == RunState.complete
+    assert any("Spotify Basic Pitch" in item for item in finished.provenance)

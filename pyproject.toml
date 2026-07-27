@@ -48,7 +48,6 @@ packages = ["server/solotrace"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "web/dist" = "solotrace/static"
-"server/solotrace/resources/chordmini" = "solotrace/resources/chordmini"
 
 [tool.uv]
 # SoloTrace ships Basic Pitch's CoreML model on macOS/Python 3.11. Its

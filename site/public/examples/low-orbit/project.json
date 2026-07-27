@@ -55,6 +55,7 @@
       "name": "Balanced",
       "source": "deterministic example",
       "tab": {
+        "capo_fret": 0,
         "chords": {
           "analyzed_end_s": 17.2,
           "analyzed_start_s": 0.7,
@@ -1393,6 +1394,7 @@
             "user_locked": false
           }
         ],
+        "preferred_fret": null,
         "sample_rate": 22050,
         "sync_anchors": [
           {
@@ -1540,6 +1542,7 @@
       "name": "Easiest",
       "source": "deterministic example",
       "tab": {
+        "capo_fret": 0,
         "chords": {
           "analyzed_end_s": 17.2,
           "analyzed_start_s": 0.7,
@@ -2878,6 +2881,7 @@
             "user_locked": false
           }
         ],
+        "preferred_fret": null,
         "sample_rate": 22050,
         "sync_anchors": [
           {
@@ -3025,6 +3029,7 @@
       "name": "One Position",
       "source": "deterministic example",
       "tab": {
+        "capo_fret": 0,
         "chords": {
           "analyzed_end_s": 17.2,
           "analyzed_start_s": 0.7,
@@ -4363,6 +4368,7 @@
             "user_locked": false
           }
         ],
+        "preferred_fret": null,
         "sample_rate": 22050,
         "sync_anchors": [
           {

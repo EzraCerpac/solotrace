@@ -573,7 +573,9 @@ def process_project(
                 start_s=body.start_s,
                 end_s=body.end_s,
                 tuning=body.tuning,
+                capo_fret=body.capo_fret,
                 fret_count=body.fret_count,
+                preferred_fret=body.preferred_fret,
                 expected_revision=body.expected_revision,
                 engine=body.engine,
                 cloud_consent=body.cloud_consent,
@@ -690,12 +692,17 @@ def _create_version(project: Project, body: VersionCreateRequest) -> Project:
     mode = body.mode
     notes = source.tab.notes
     if mode is not None:
-        unlocked = [note.model_copy(update={"user_locked": False}) for note in source.tab.notes]
+        input_notes = (
+            [note.model_copy(update={"user_locked": False}) for note in source.tab.notes]
+            if body.lock_policy == "clear"
+            else source.tab.notes
+        )
         arranged = assign_fingerings(
-            unlocked,
-            source.tab.tuning,
-            source.tab.fret_count,
+            input_notes,
+            source.tab.sounding_tuning,
+            source.tab.available_fret_count,
             mode,
+            source.tab.preferred_fret,
         )
         notes = [
             note.model_copy(
@@ -705,7 +712,9 @@ def _create_version(project: Project, body: VersionCreateRequest) -> Project:
                         if (previous.string, previous.fret) == (note.string, note.fret)
                         else False
                     ),
-                    "user_locked": False,
+                    "user_locked": (
+                        previous.user_locked if body.lock_policy == "preserve" else False
+                    ),
                 }
             )
             for previous, note in zip(source.tab.notes, arranged, strict=True)

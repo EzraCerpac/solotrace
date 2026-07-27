@@ -149,6 +149,8 @@ class Pipeline:
         tuning: list[int],
         fret_count: int,
         expected_revision: int,
+        capo_fret: int = 0,
+        preferred_fret: int | None = None,
         engine: ProcessingEngine = "preview",
         cloud_consent: bool = False,
     ) -> Project:
@@ -206,7 +208,9 @@ class Pipeline:
             start_s,
             end_s,
             tuning,
+            capo_fret,
             fret_count,
+            preferred_fret,
             engine,
             cancellation,
         )
@@ -373,7 +377,9 @@ class Pipeline:
         start_s: float,
         end_s: float,
         tuning: list[int],
+        capo_fret: int,
         fret_count: int,
+        preferred_fret: int | None,
         engine: ProcessingEngine,
         cancellation: threading.Event,
     ) -> None:
@@ -465,19 +471,24 @@ class Pipeline:
                 )
                 if cancellation.is_set():
                     raise MVSepCancelled("Draft cancelled")
-                if engine == "mvsep":
+                sounding_tuning = [pitch + capo_fret for pitch in tuning]
+                available_frets = fret_count - capo_fret
+                use_basic_pitch = engine == "mvsep" or self.settings.basic_pitch_available
+                if use_basic_pitch:
                     tab = transcribe_basic_pitch(
                         temporary_lead,
                         original,
                         start_s,
                         end_s,
                         sample_rate,
-                        tuning,
-                        fret_count,
+                        sounding_tuning,
+                        available_frets,
                         temporary,
                         self.settings.basic_pitch_command,
                         self.settings.basic_pitch_worker,
+                        preferred_fret,
                     )
+                    transcription_route = "Spotify Basic Pitch"
                 else:
 
                     def transcription_progress(detail: str) -> None:
@@ -494,12 +505,22 @@ class Pipeline:
                         temporary_lead,
                         start_s,
                         end_s,
-                        tuning,
-                        fret_count,
+                        sounding_tuning,
+                        available_frets,
                         rhythm_path=original,
                         progress=transcription_progress,
                         cancelled=cancellation.is_set,
+                        preferred_fret=preferred_fret,
                     )
+                    transcription_route = "librosa pYIN fallback"
+                tab = tab.model_copy(
+                    update={
+                        "tuning": tuning,
+                        "capo_fret": capo_fret,
+                        "fret_count": fret_count,
+                        "preferred_fret": preferred_fret,
+                    }
+                )
                 self._set_run(
                     project_id,
                     run_id,
@@ -667,8 +688,10 @@ class Pipeline:
                                 "Audio decoded locally with FFmpeg.",
                                 "Preview stem uses harmonic, center-focused filtering; "
                                 "it is not lead-only separation.",
-                                "Notes and beats estimated locally with librosa pYIN "
-                                "and beat tracking.",
+                                f"Notes estimated locally with {transcription_route}; "
+                                "beats estimated locally with librosa.",
+                                "Instrument profile stores uncapoed tuning; sounding pitch "
+                                "includes the capo.",
                                 "String and fret positions optimized for playability.",
                             ]
                         ),

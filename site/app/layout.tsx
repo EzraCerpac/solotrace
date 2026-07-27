@@ -16,7 +16,14 @@ export const metadata: Metadata = {
     type: "website",
     title: "SoloTrace",
     description: "Hear it. Trace it. Play it — free, editable guitar-solo examples.",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "SoloTrace waveform aligned with guitar tablature" }],
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "SoloTrace review-first chord lane aligned with guitar tablature",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",

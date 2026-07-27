@@ -87,7 +87,9 @@ export function makeProject({
       tempo_bpm: 120,
       time_signature: [4, 4],
       tuning,
+      capo_fret: 0,
       fret_count: 22,
+      preferred_fret: null,
       sync_anchors: [
         { audio_frame: passage.start_s * 48_000, score_tick: passage.start_s * 960 },
         { audio_frame: passage.end_s * 48_000, score_tick: passage.end_s * 960 },

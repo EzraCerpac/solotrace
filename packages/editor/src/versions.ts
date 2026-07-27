@@ -1,4 +1,5 @@
 import { assignFingerings } from './fingering'
+import { availableFretCount, soundingTuning } from './instrument'
 import type {
   EditorProject,
   FingeringMode,
@@ -18,6 +19,7 @@ export interface CreateRefingeredVersionOptions {
   versionId: string
   name: string
   createdAt: string
+  lockPolicy?: 'preserve' | 'clear'
 }
 
 export function createRefingeredVersion(
@@ -30,11 +32,16 @@ export function createRefingeredVersion(
   const sourceId = options.sourceVersionId ?? project.active_version_id
   const source = project.versions.find((version) => version.id === sourceId)
   if (!source) throw new Error(`Source version ${sourceId} does not exist`)
+  const inputNotes =
+    options.lockPolicy === 'clear'
+      ? source.tab.notes.map((note) => ({ ...note, user_locked: false }))
+      : source.tab.notes
   const notes = assignFingerings(
-    source.tab.notes,
-    source.tab.tuning,
-    source.tab.fret_count,
+    inputNotes,
+    soundingTuning(source.tab),
+    availableFretCount(source.tab),
     options.mode,
+    source.tab.preferred_fret,
   )
   const version: TabVersion = {
     id: options.versionId,

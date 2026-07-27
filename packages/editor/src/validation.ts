@@ -216,7 +216,15 @@ function isVersion(value: unknown): value is TabVersion {
   if (tab.chords === undefined) tab.chords = emptyChordTrack()
   const timeSignature = tab.time_signature
   const tuning = tab.tuning
+  const capoFret = tab.capo_fret
   const fretCount = tab.fret_count
+  const preferredFret = tab.preferred_fret
+  const soundingTuning =
+    Array.isArray(tuning) && isInteger(capoFret)
+      ? tuning.map((pitch) => Number(pitch) + capoFret)
+      : []
+  const availableFretCount =
+    isInteger(fretCount) && isInteger(capoFret) ? fretCount - capoFret : -1
   const modes = new Set<FingeringMode>(['balanced', 'easiest', 'position'])
   if (
     typeof value.id !== 'string' ||
@@ -240,8 +248,16 @@ function isVersion(value: unknown): value is TabVersion {
     tuning.length < 4 ||
     tuning.length > 8 ||
     !tuning.every((pitch) => isInteger(pitch) && pitch >= 0 && pitch <= 127) ||
+    !isInteger(capoFret) ||
+    capoFret < 0 ||
+    capoFret > 12 ||
     !isInteger(fretCount) ||
-    fretCount < 0 ||
+    fretCount < 12 ||
+    availableFretCount < 1 ||
+    !(
+      preferredFret === null ||
+      (isInteger(preferredFret) && preferredFret >= 0 && preferredFret <= availableFretCount)
+    ) ||
     !Array.isArray(tab.sync_anchors) ||
     !tab.sync_anchors.every(
       (anchor) =>
@@ -253,7 +269,7 @@ function isVersion(value: unknown): value is TabVersion {
     ) ||
     !Array.isArray(tab.notes) ||
     tab.notes.length === 0 ||
-    !tab.notes.every((note) => isNote(note, tuning, fretCount)) ||
+    !tab.notes.every((note) => isNote(note, soundingTuning, availableFretCount)) ||
     !isChordTrack(tab.chords)
   ) {
     return false
@@ -264,6 +280,13 @@ function isVersion(value: unknown): value is TabVersion {
 /** Runtime guard for untrusted static, browser-storage, and D1 documents. */
 export function isEditorProject(value: unknown): value is EditorProject {
   if (!isRecord(value)) return false
+  if (Array.isArray(value.versions)) {
+    value.versions.forEach((version) => {
+      if (!isRecord(version) || !isRecord(version.tab)) return
+      if (version.tab.capo_fret === undefined) version.tab.capo_fret = 0
+      if (version.tab.preferred_fret === undefined) version.tab.preferred_fret = null
+    })
+  }
   const versions = value.versions
   const passage = value.passage
   const origins = new Set(['local', 'example', 'saved-example'])
