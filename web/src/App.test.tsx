@@ -1,7 +1,9 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { vi } from 'vitest'
 
-import { makeProject } from './test-project'
+import { emptyChordTrack } from '@solotrace/editor'
+import { makeNote, makeProject } from './test-project'
+import type { ChordTrack, Project } from './types'
 
 const project = makeProject()
 const apiMock = vi.hoisted(() => ({
@@ -9,6 +11,7 @@ const apiMock = vi.hoisted(() => ({
   capabilities: vi.fn(),
   getProject: vi.fn(),
   patchNotes: vi.fn(),
+  patchChords: vi.fn(),
   processProject: vi.fn(),
   refinger: vi.fn(),
   createProject: vi.fn(),
@@ -24,6 +27,7 @@ vi.mock('./api', () => ({
 import App from './App'
 
 beforeEach(() => {
+  vi.clearAllMocks()
   apiMock.listProjects.mockResolvedValue([project])
   apiMock.getProject.mockResolvedValue(project)
   apiMock.capabilities.mockResolvedValue({
@@ -176,4 +180,186 @@ test('Play mode removes editing controls and keeps seeking, tracks, and keyboard
     fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }))
   })
   expect(document.documentElement.requestFullscreen).toHaveBeenCalled()
+})
+
+function makeReviewProject(): Project {
+  const uncertain = makeNote('uncertain-note', 2, 2.4)
+  uncertain.confidence.pitch = 0.42
+  const confident = makeNote('confident-note', 3, 3.4)
+  const reviewProject = makeProject({
+    duration: 8,
+    passage: { name: 'Whole song', start_s: 0, end_s: 8 },
+    notes: [uncertain, confident],
+  })
+  reviewProject.tab.chords = {
+    ...emptyChordTrack(),
+    analyzed_start_s: 0,
+    analyzed_end_s: 8,
+    events: [
+      {
+        id: 'reviewed-opening-chord',
+        onset_frame: 0,
+        end_frame: 48_000,
+        audio_onset_s: 0,
+        audio_offset_s: 1,
+        score_tick: 0,
+        duration_ticks: 960,
+        kind: 'chord',
+        root: { step: 'C', alter: 0 },
+        quality: 'maj',
+        bass: null,
+        model_score: 0.91,
+        alternatives: [],
+        provenance: 'detected',
+        edited: false,
+        reviewed: true,
+      },
+      {
+        id: 'uncertain-chord',
+        onset_frame: 48_000,
+        end_frame: 96_000,
+        audio_onset_s: 1,
+        audio_offset_s: 2,
+        score_tick: 960,
+        duration_ticks: 960,
+        kind: 'chord',
+        root: { step: 'A', alter: 0 },
+        quality: 'min',
+        bass: null,
+        model_score: 0.61,
+        alternatives: [],
+        provenance: 'detected',
+        edited: false,
+        reviewed: false,
+      },
+      {
+        id: 'reviewed-closing-chord',
+        onset_frame: 96_000,
+        end_frame: 384_000,
+        audio_onset_s: 2,
+        audio_offset_s: 8,
+        score_tick: 1920,
+        duration_ticks: 5760,
+        kind: 'chord',
+        root: { step: 'F', alter: 0 },
+        quality: 'maj',
+        bass: null,
+        model_score: 0.9,
+        alternatives: [],
+        provenance: 'detected',
+        edited: false,
+        reviewed: true,
+      },
+    ],
+  }
+  return reviewProject
+}
+
+function mockReviewPersistence(initial: Project) {
+  let serverProject = initial
+  apiMock.patchNotes.mockImplementation(
+    async (
+      _projectId: string,
+      _versionId: string,
+      _expectedRevision: number,
+      notes: Project['tab']['notes'],
+    ) => {
+      serverProject = {
+        ...serverProject,
+        revision: serverProject.revision + 1,
+        tab: { ...serverProject.tab, notes },
+      }
+      return serverProject
+    },
+  )
+  apiMock.patchChords.mockImplementation(
+    async (
+      _projectId: string,
+      _versionId: string,
+      _expectedRevision: number,
+      chords: ChordTrack,
+    ) => {
+      serverProject = {
+        ...serverProject,
+        revision: serverProject.revision + 1,
+        tab: { ...serverProject.tab, chords },
+      }
+      return serverProject
+    },
+  )
+}
+
+test('reviews notes and chords in one keyboard-first session, then restores playback state', async () => {
+  const reviewProject = makeReviewProject()
+  apiMock.listProjects.mockResolvedValue([reviewProject])
+  apiMock.getProject.mockResolvedValue(reviewProject)
+  mockReviewPersistence(reviewProject)
+
+  render(<App />)
+  const start = await screen.findByRole('button', {
+    name: 'Review · 2 remaining',
+  })
+  fireEvent.click(start)
+
+  expect(screen.getByRole('button', { name: 'Lead' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  expect(screen.getByRole('button', { name: /Loop 00:00 to 00:03/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  expect(screen.getByText('Check chord match · 61% confidence')).toBeInTheDocument()
+
+  fireEvent.keyDown(window, { key: 'a' })
+  await screen.findByText('Check pitch')
+  expect(apiMock.patchChords).toHaveBeenCalledTimes(1)
+
+  const pitchInput = screen.getByLabelText('MIDI pitch')
+  fireEvent.keyDown(pitchInput, { key: 'a' })
+  expect(apiMock.patchNotes).not.toHaveBeenCalled()
+
+  fireEvent.keyDown(window, { key: 'a' })
+  await screen.findByText('Review complete')
+  expect(apiMock.patchNotes).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Finish' }))
+  expect(screen.getByRole('button', { name: 'Full mix' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  expect(screen.getByRole('button', { name: /Loop 00:00 to 00:08/ })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  )
+})
+
+test('undoes and redoes alternating note and chord changes through one history', async () => {
+  const reviewProject = makeReviewProject()
+  apiMock.listProjects.mockResolvedValue([reviewProject])
+  apiMock.getProject.mockResolvedValue(reviewProject)
+  mockReviewPersistence(reviewProject)
+
+  render(<App />)
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Review · 2 remaining' }),
+  )
+  fireEvent.keyDown(window, { key: 'a' })
+  await screen.findByText('Check pitch')
+  fireEvent.keyDown(window, { key: 'a' })
+  await screen.findByText('Review complete')
+
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+  await waitFor(() => expect(apiMock.patchNotes).toHaveBeenCalledTimes(2))
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+  await waitFor(() => expect(apiMock.patchChords).toHaveBeenCalledTimes(2))
+
+  expect(screen.getByText('2 remaining')).toBeInTheDocument()
+
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+  await waitFor(() => expect(apiMock.patchChords).toHaveBeenCalledTimes(3))
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+  await waitFor(() => expect(apiMock.patchNotes).toHaveBeenCalledTimes(3))
+
+  expect(screen.getByText('Review complete')).toBeInTheDocument()
 })

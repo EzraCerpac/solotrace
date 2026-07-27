@@ -59,6 +59,11 @@ as encrypted Actions secrets.
 The workflow creates the tag at the exact tested commit and publishes a
 prerelease only after all release checks pass.
 
+The clean-Mac pass must install the DMG through Gatekeeper, open the generated
+demo, import a local song, run Offline preview, review one note and one chord
+without a pointer, enter Play mode, export and re-import a SoloTrace bundle,
+then relaunch and confirm project persistence.
+
 ## Local release
 
 The same release path can run on an enrolled Apple-Silicon Mac:

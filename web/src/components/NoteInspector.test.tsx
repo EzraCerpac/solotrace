@@ -53,6 +53,8 @@ function renderInspector(overrides: Partial<NoteEvent> = {}) {
 test('keeps review actions visible and saves edits as reviewed', () => {
   const callbacks = renderInspector()
 
+  expect(screen.getByText('Check timing')).toBeInTheDocument()
+
   fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
   expect(callbacks.onAccept).toHaveBeenCalledWith(note)
 

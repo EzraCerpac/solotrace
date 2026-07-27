@@ -24,8 +24,9 @@ import { Transport } from './components/Transport'
 import { UploadDialog } from './components/UploadDialog'
 import { VersionDialog } from './components/VersionDialog'
 import { Waveform } from './components/Waveform'
-import { formatTime, minimumConfidence, pitchName } from './music'
+import { formatTime, pitchName } from './music'
 import { audioFrameToScoreTick } from './music'
+import { reviewItemsForProject, type ReviewItem } from './review'
 import { legalFingerings, soundingTuning, availableFretCount } from '@solotrace/editor'
 import type {
   AssetRole,
@@ -82,33 +83,6 @@ function summaryFromProject(project: Project): ProjectSummary {
   }
 }
 
-interface ReviewItem {
-  id: string
-  kind: 'note' | 'chord'
-  time: number
-}
-
-function reviewItemsForProject(project: Project): ReviewItem[] {
-  return [
-    ...project.tab.notes
-      .filter(
-        (note) => !note.reviewed && minimumConfidence(note.confidence) < 0.72,
-      )
-      .map((note) => ({
-        id: note.id,
-        kind: 'note' as const,
-        time: note.audio_onset_s,
-      })),
-    ...project.tab.chords.events
-      .filter((chord) => !chord.reviewed)
-      .map((chord) => ({
-        id: chord.id,
-        kind: 'chord' as const,
-        time: chord.audio_onset_s,
-      })),
-  ].sort((left, right) => left.time - right.time)
-}
-
 interface WorkspacePreferences {
   track: AssetRole
   speed: number
@@ -121,6 +95,23 @@ interface InstrumentProfile {
   capoFret: number
   fretCount: number
   preferredFret: number | null
+}
+
+type ReviewHistoryEntry =
+  | {
+      kind: 'notes'
+      before: NoteEvent[]
+      after: NoteEvent[]
+    }
+  | {
+      kind: 'chords'
+      before: ChordTrack
+      after: ChordTrack
+    }
+
+interface ReviewReturnState {
+  track: AssetRole
+  loop: boolean
 }
 
 function preferenceKey(projectId: string): string {
@@ -141,8 +132,9 @@ function App() {
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const bundleInputRef = useRef<HTMLInputElement>(null)
   const savingRef = useRef(false)
-  const undoStackRef = useRef<NoteEvent[][]>([])
-  const redoStackRef = useRef<NoteEvent[][]>([])
+  const reviewUndoRef = useRef<ReviewHistoryEntry[]>([])
+  const reviewRedoRef = useRef<ReviewHistoryEntry[]>([])
+  const reviewReturnRef = useRef<ReviewReturnState | null>(null)
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [trashedProjects, setTrashedProjects] = useState<ProjectSummary[]>([])
@@ -168,18 +160,10 @@ function App() {
   const [railOpen, setRailOpen] = useState(false)
   const [mobileLayout, setMobileLayout] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [historyVersion, setHistoryVersion] = useState(0)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
-  const [undoDelete, setUndoDelete] = useState<{
-    projectId: string
-    versionId: string
-    note: NoteEvent
-  } | null>(null)
   const [viewMode, setViewMode] = useState<'edit' | 'play'>('edit')
   const [fullscreen, setFullscreen] = useState(false)
-  const [chordUndo, setChordUndo] = useState<ChordTrack[]>([])
-  const [chordRedo, setChordRedo] = useState<ChordTrack[]>([])
   const [reviewMode, setReviewMode] = useState(false)
   const [instrumentProfile, setInstrumentProfile] = useState<InstrumentProfile>({
     tuning: [40, 45, 50, 55, 59, 64],
@@ -237,8 +221,8 @@ function App() {
   useEffect(() => {
     setSelectedNoteId(null)
     setSelectedChordId(null)
-    setChordUndo([])
-    setChordRedo([])
+    setReviewMode(false)
+    reviewReturnRef.current = null
   }, [project?.active_version_id, project?.id])
 
   useEffect(() => {
@@ -323,9 +307,8 @@ function App() {
       fretCount: project.tab.fret_count,
       preferredFret: project.tab.preferred_fret,
     })
-    undoStackRef.current = []
-    redoStackRef.current = []
-    setHistoryVersion((value) => value + 1)
+    reviewUndoRef.current = []
+    reviewRedoRef.current = []
   }, [project?.id, project?.active_version_id])
 
   useEffect(() => {
@@ -368,15 +351,42 @@ function App() {
     const update = () => {
       const audio = audioRef.current
       if (!audio) return
-      if (loop && passage && audio.currentTime >= passage.end_s) {
-        audio.currentTime = passage.start_s
+      const reviewSelection =
+        project?.tab.chords.events.find((chord) => chord.id === selectedChordId) ??
+        project?.tab.notes.find((note) => note.id === selectedNoteId)
+      const loopStart =
+        reviewMode && reviewSelection
+          ? Math.max(0, reviewSelection.audio_onset_s - 0.75)
+          : passage?.start_s
+      const loopEnd =
+        reviewMode && reviewSelection
+          ? Math.min(
+              project?.duration_s ?? reviewSelection.audio_offset_s,
+              reviewSelection.audio_offset_s + 0.75,
+            )
+          : passage?.end_s
+      if (
+        loop &&
+        loopStart !== undefined &&
+        loopEnd !== undefined &&
+        audio.currentTime >= loopEnd
+      ) {
+        audio.currentTime = loopStart
       }
       setCurrentTime(audio.currentTime)
       animationFrame = requestAnimationFrame(update)
     }
     animationFrame = requestAnimationFrame(update)
     return () => cancelAnimationFrame(animationFrame)
-  }, [loop, passage, playing])
+  }, [
+    loop,
+    passage,
+    playing,
+    project,
+    reviewMode,
+    selectedChordId,
+    selectedNoteId,
+  ])
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current
@@ -392,33 +402,6 @@ function App() {
     audio.currentTime = next
     setCurrentTime(next)
   }, [])
-
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      const target = event.target
-      if (
-        (target instanceof Element &&
-          target.matches(
-            'input, textarea, select, button, summary, a, [role="button"]',
-          )) ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return
-      }
-      if (event.code === 'Space') {
-        event.preventDefault()
-        togglePlay()
-      } else if (viewMode === 'play' && event.key === 'ArrowLeft') {
-        event.preventDefault()
-        seek(currentTime - 5)
-      } else if (viewMode === 'play' && event.key === 'ArrowRight') {
-        event.preventDefault()
-        seek(currentTime + 5)
-      }
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [currentTime, seek, togglePlay, viewMode])
 
   const bindAudio = useCallback((node: HTMLAudioElement | null) => {
     audioRef.current = node
@@ -447,18 +430,12 @@ function App() {
           reviewSelection.audio_offset_s + 0.75,
         )
       : passage?.end_s ?? project?.duration_s ?? 0
-  const uncertainNotes = useMemo(
-    () =>
-      project?.tab.notes
-        .filter(
-          (note) => !note.reviewed && minimumConfidence(note.confidence) < 0.72,
-        )
-        .sort((left, right) => left.audio_onset_s - right.audio_onset_s) ?? [],
-    [project],
-  )
   const reviewItems = useMemo(
     () => (project ? reviewItemsForProject(project) : []),
     [project],
+  )
+  const selectedReviewIndex = reviewItems.findIndex(
+    (item) => item.id === (selectedChordId ?? selectedNoteId),
   )
   const selectedStart = draftScope === 'whole' ? 0 : passage?.start_s ?? 0
   const selectedEnd = draftScope === 'whole' ? project?.duration_s ?? 0 : passage?.end_s ?? 0
@@ -512,7 +489,6 @@ function App() {
     savingRef.current = true
     setSaving(true)
     setError('')
-    setUndoDelete(null)
     setProject({ ...project, tab: { ...project.tab, notes } })
     try {
       const updated = toDesktopProject(
@@ -528,9 +504,13 @@ function App() {
       )
       adoptProject(updated, false)
       if (recordHistory) {
-        undoStackRef.current.push(previous.tab.notes)
-        redoStackRef.current = []
-        setHistoryVersion((value) => value + 1)
+        reviewUndoRef.current.push({
+          kind: 'notes',
+          before: previous.tab.notes,
+          after: notes,
+        })
+        reviewUndoRef.current = reviewUndoRef.current.slice(-100)
+        reviewRedoRef.current = []
       }
       setNotice(message)
       return updated
@@ -538,7 +518,10 @@ function App() {
       if (saveError instanceof ApiError && saveError.status === 409) {
         const fresh = await loadDesktopProject(project.id)
         adoptProject(fresh)
-        setError('A newer edit won. Reloaded latest notes; try your change again.')
+        setSelectedNoteId(null)
+        reviewUndoRef.current = []
+        reviewRedoRef.current = []
+        setError('A newer edit won. Review history was cleared and the latest version reloaded.')
       } else {
         setProject((current) => (current?.id === previous.id ? previous : current))
         setProjects((current) =>
@@ -581,8 +564,13 @@ function App() {
       )
       adoptProject(updated, false)
       if (recordHistory) {
-        setChordUndo((history) => [...history, previous.tab.chords].slice(-100))
-        setChordRedo([])
+        reviewUndoRef.current.push({
+          kind: 'chords',
+          before: previous.tab.chords,
+          after: normalized,
+        })
+        reviewUndoRef.current = reviewUndoRef.current.slice(-100)
+        reviewRedoRef.current = []
       }
       setNotice(message)
       return updated
@@ -591,9 +579,9 @@ function App() {
         const fresh = await loadDesktopProject(project.id)
         adoptProject(fresh)
         setSelectedChordId(null)
-        setChordUndo([])
-        setChordRedo([])
-        setError('A newer edit won. Chord history was cleared and the latest version reloaded.')
+        reviewUndoRef.current = []
+        reviewRedoRef.current = []
+        setError('A newer edit won. Review history was cleared and the latest version reloaded.')
       } else {
         setProject((current) => (current?.id === previous.id ? previous : current))
         setError(saveError instanceof Error ? saveError.message : 'Could not save chords')
@@ -614,7 +602,40 @@ function App() {
       setSelectedNoteId(null)
       setSelectedChordId(item.id)
     }
-    seek(item.time)
+    seek(Math.max(0, item.time - 0.75))
+  }
+
+  const moveReviewSelection = (direction: -1 | 1) => {
+    if (!reviewItems.length) return
+    if (selectedReviewIndex < 0) {
+      selectReviewItem(direction === 1 ? reviewItems[0] : reviewItems.at(-1))
+      return
+    }
+    const nextIndex =
+      (selectedReviewIndex + direction + reviewItems.length) % reviewItems.length
+    selectReviewItem(reviewItems[nextIndex])
+  }
+
+  const startReview = () => {
+    if (!reviewItems.length) return
+    reviewReturnRef.current = { track, loop }
+    setReviewMode(true)
+    setLoop(true)
+    if (assets.some((asset) => asset.role === 'lead')) switchTrack('lead')
+    selectReviewItem(reviewItems[0])
+  }
+
+  const finishReview = () => {
+    const previous = reviewReturnRef.current
+    reviewReturnRef.current = null
+    setReviewMode(false)
+    setSelectedNoteId(null)
+    setSelectedChordId(null)
+    if (!previous) return
+    setLoop(previous.loop)
+    if (assets.some((asset) => asset.role === previous.track)) {
+      switchTrack(previous.track)
+    }
   }
 
   const selectNextReview = (
@@ -759,55 +780,15 @@ function App() {
 
   const deleteSelectedChord = () => {
     if (!project || !selectedChord) return
-    const track = deleteChordToUnknown(project.tab.chords, selectedChord.id)
-    void saveChords(track, 'Chord changed to unknown')
+    const track = setChordReviewed(
+      deleteChordToUnknown(project.tab.chords, selectedChord.id),
+      selectedChord.id,
+      true,
+    )
+    void saveChords(track, 'Chord changed to unknown').then((updated) => {
+      if (updated) selectNextReview(updated, selectedChord)
+    })
   }
-
-  const undoChordEdit = async () => {
-    if (!project || !chordUndo.length || savingRef.current) return
-    const target = chordUndo.at(-1)!
-    const current = project.tab.chords
-    const updated = await saveChords(target, 'Chord edit undone', false)
-    if (updated) {
-      setChordUndo((history) => history.slice(0, -1))
-      setChordRedo((history) => [...history, current].slice(-100))
-    }
-  }
-
-  const redoChordEdit = async () => {
-    if (!project || !chordRedo.length || savingRef.current) return
-    const target = chordRedo.at(-1)!
-    const current = project.tab.chords
-    const updated = await saveChords(target, 'Chord edit redone', false)
-    if (updated) {
-      setChordRedo((history) => history.slice(0, -1))
-      setChordUndo((history) => [...history, current].slice(-100))
-    }
-  }
-
-  useEffect(() => {
-    const handleChordUndo = (event: KeyboardEvent) => {
-      if (
-        !selectedChordId ||
-        !(event.metaKey || event.ctrlKey) ||
-        event.key.toLowerCase() !== 'z'
-      ) {
-        return
-      }
-      const target = event.target
-      if (
-        (target instanceof Element && target.matches('input, textarea, select')) ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return
-      }
-      event.preventDefault()
-      if (event.shiftKey) void redoChordEdit()
-      else void undoChordEdit()
-    }
-    window.addEventListener('keydown', handleChordUndo)
-    return () => window.removeEventListener('keydown', handleChordUndo)
-  })
 
   const changeFingering = (noteId: string, fingering: Fingering) => {
     if (viewMode !== 'edit' || !project || savingRef.current) return
@@ -826,32 +807,34 @@ function App() {
     void saveNotes(notes, `Moved note to string ${fingering.string}, fret ${fingering.fret}`)
   }
 
-  const undoNoteMutation = async () => {
+  const undoReviewMutation = async () => {
     if (!project || savingRef.current) return
-    const target = undoStackRef.current.pop()
-    if (!target) return
-    const current = project.tab.notes
-    const updated = await saveNotes(target, 'Undid note change', false)
+    const entry = reviewUndoRef.current.pop()
+    if (!entry) return
+    const updated =
+      entry.kind === 'notes'
+        ? await saveNotes(entry.before, 'Undid note change', false)
+        : await saveChords(entry.before, 'Undid chord change', false)
     if (updated) {
-      redoStackRef.current.push(current)
+      reviewRedoRef.current.push(entry)
     } else {
-      undoStackRef.current.push(target)
+      reviewUndoRef.current.push(entry)
     }
-    setHistoryVersion((value) => value + 1)
   }
 
-  const redoNoteMutation = async () => {
+  const redoReviewMutation = async () => {
     if (!project || savingRef.current) return
-    const target = redoStackRef.current.pop()
-    if (!target) return
-    const current = project.tab.notes
-    const updated = await saveNotes(target, 'Redid note change', false)
+    const entry = reviewRedoRef.current.pop()
+    if (!entry) return
+    const updated =
+      entry.kind === 'notes'
+        ? await saveNotes(entry.after, 'Redid note change', false)
+        : await saveChords(entry.after, 'Redid chord change', false)
     if (updated) {
-      undoStackRef.current.push(current)
+      reviewUndoRef.current.push(entry)
     } else {
-      redoStackRef.current.push(target)
+      reviewRedoRef.current.push(entry)
     }
-    setHistoryVersion((value) => value + 1)
   }
 
   const addNoteAtPlayhead = () => {
@@ -933,43 +916,71 @@ function App() {
 
   const deleteNote = (note: NoteEvent) => {
     if (!project) return
-    const projectId = project.id
-    const versionId = project.active_version_id
     const notes = project.tab.notes.filter((candidate) => candidate.id !== note.id)
     setSelectedNoteId(null)
     void saveNotes(notes, 'Note deleted').then((updated) => {
       if (!updated) return
-      setUndoDelete({ projectId, versionId, note })
       selectNextReview(updated, note)
     })
   }
 
-  const undoNoteDelete = async () => {
-    if (!project || !undoDelete) return
-    if (
-      project.id !== undoDelete.projectId ||
-      project.active_version_id !== undoDelete.versionId
-    ) {
-      setUndoDelete(null)
-      return
-    }
-    const notes = [...project.tab.notes, undoDelete.note].sort(
-      (left, right) =>
-        left.audio_onset_s - right.audio_onset_s ||
-        left.midi_pitch - right.midi_pitch,
-    )
-    const restored = await saveNotes(notes, 'Note restored')
-    if (restored) {
-      setSelectedNoteId(undoDelete.note.id)
-      setUndoDelete(null)
-    }
-  }
-
   useEffect(() => {
-    if (!undoDelete) return
-    const timeout = window.setTimeout(() => setUndoDelete(null), 10_000)
-    return () => window.clearTimeout(timeout)
-  }, [undoDelete])
+    const handleKey = (event: KeyboardEvent) => {
+      const target = event.target
+      const editingText =
+        (target instanceof Element &&
+          target.matches('input, textarea, select')) ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      if (editingText) return
+
+      const key = event.key.toLowerCase()
+      if (
+        viewMode === 'edit' &&
+        (event.metaKey || event.ctrlKey) &&
+        key === 'z'
+      ) {
+        event.preventDefault()
+        if (event.shiftKey) void redoReviewMutation()
+        else void undoReviewMutation()
+        return
+      }
+
+      if (reviewMode && viewMode === 'edit' && !event.metaKey && !event.ctrlKey) {
+        if (key === 'j') {
+          event.preventDefault()
+          moveReviewSelection(-1)
+          return
+        }
+        if (key === 'k') {
+          event.preventDefault()
+          moveReviewSelection(1)
+          return
+        }
+        if (key === 'a' && !savingRef.current) {
+          event.preventDefault()
+          if (selectedNote) acceptNote(selectedNote)
+          else if (selectedChord) reviewSelectedChord(true)
+          return
+        }
+      }
+
+      const interactive =
+        target instanceof Element &&
+        target.matches('button, summary, a, [role="button"]')
+      if (event.code === 'Space' && !interactive) {
+        event.preventDefault()
+        togglePlay()
+      } else if (viewMode === 'play' && event.key === 'ArrowLeft') {
+        event.preventDefault()
+        seek(currentTime - 5)
+      } else if (viewMode === 'play' && event.key === 'ArrowRight') {
+        event.preventDefault()
+        seek(currentTime + 5)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  })
 
   const createDraft = async () => {
     if (viewMode !== 'edit' || !project || !passage) return
@@ -1011,8 +1022,8 @@ function App() {
     setError('')
     setSelectedNoteId(null)
     setSelectedChordId(null)
-    setChordUndo([])
-    setChordRedo([])
+    reviewUndoRef.current = []
+    reviewRedoRef.current = []
     try {
       const next = await api.analyzeChords(
         project.id,
@@ -1079,7 +1090,6 @@ function App() {
       setDraftScope(preferences?.draftScope ?? 'whole')
       setCurrentTime(0)
       setSelectedNoteId(null)
-      setUndoDelete(null)
       setRailOpen(false)
       setCloudConsent(false)
       try {
@@ -1111,7 +1121,6 @@ function App() {
       )
       adoptProject(next, false)
       setSelectedNoteId(null)
-      setUndoDelete(null)
       setNotice(`Opened ${version.name}`)
     } catch (versionError) {
       setError(versionError instanceof Error ? versionError.message : 'Could not open version')
@@ -1179,7 +1188,6 @@ function App() {
       )
       adoptProject(next, false)
       setSelectedNoteId(null)
-      setUndoDelete(null)
       setNotice(`Deleted ${version.name}`)
     } catch (versionError) {
       setError(versionError instanceof Error ? versionError.message : 'Could not delete version')
@@ -1499,7 +1507,7 @@ function App() {
       className={
         viewMode === 'play'
           ? 'play-shell'
-          : `app-shell ${selectedNote ? 'has-inspector' : ''}`
+          : `app-shell ${selectedNote || selectedChord ? 'has-inspector' : ''}`
       }
     >
       <audio ref={bindAudio} preload="metadata" />
@@ -2009,6 +2017,7 @@ function App() {
                     type="button"
                     key={role}
                     className={track === role ? 'active' : ''}
+                    aria-pressed={track === role}
                     disabled={!assets.some((asset) => asset.role === role)}
                     onClick={() => switchTrack(role)}
                   >
@@ -2026,116 +2035,58 @@ function App() {
                 <Icon name="spark" />
                 Find chords
               </button>
-            </div>
-            <div className="review-tools">
               <button
                 type="button"
-                className={`button secondary ${reviewMode ? 'active' : ''}`}
-                aria-pressed={reviewMode}
-                onClick={() => {
-                  const nextMode = !reviewMode
-                  setReviewMode(nextMode)
-                  if (nextMode) {
-                    const first = uncertainNotes[0]
-                    if (first) {
-                      setSelectedNoteId(first.id)
-                      seek(Math.max(0, first.audio_onset_s - 0.5))
-                      setLoop(true)
-                      if (assets.some((asset) => asset.role === 'lead')) switchTrack('lead')
-                    }
-                  }
-                }}
-              >
-                Review
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Previous ambiguous note"
-                disabled={!uncertainNotes.length}
-                onClick={() => {
-                  const currentIndex = uncertainNotes.findIndex((note) => note.id === selectedNoteId)
-                  const previous = uncertainNotes[
-                    (currentIndex - 1 + uncertainNotes.length) % uncertainNotes.length
-                  ]
-                  if (previous) {
-                    setSelectedNoteId(previous.id)
-                    seek(Math.max(0, previous.audio_onset_s - 0.5))
-                  }
-                }}
-              >
-                <Icon name="back" />
-              </button>
-              <button
-                type="button"
-                className="review-count"
-                disabled={!reviewItems.length}
-                onClick={() => {
-                  const selectedId = selectedChordId ?? selectedNoteId
-                  const currentIndex = reviewItems.findIndex(
-                    (item) => item.id === selectedId,
-                  )
-                  selectReviewItem(
-                    reviewItems[(currentIndex + 1) % reviewItems.length],
-                  )
-                }}
-              >
-                <span>{reviewItems.length}</span>
-                {reviewItems.length === 1 ? 'item needs review' : 'items need review'}
-                <Icon name="next" />
-              </button>
-              <button
-                type="button"
-                className="review-count chord-history-button"
-                disabled={!chordUndo.length || saving}
-                onClick={() => void undoChordEdit()}
-              >
-                Undo chord
-              </button>
-              <button
-                type="button"
-                className="review-count chord-history-button"
-                disabled={!chordRedo.length || saving}
-                onClick={() => void redoChordEdit()}
-              >
-                Redo chord
-              </button>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={saving || !undoStackRef.current.length}
-                onClick={() => void undoNoteMutation()}
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={saving || !redoStackRef.current.length}
-                onClick={() => void redoNoteMutation()}
-              >
-                Redo
-              </button>
-              <button
-                type="button"
-                className="button secondary"
+                className="button secondary add-note-button"
                 disabled={saving}
                 onClick={addNoteAtPlayhead}
               >
-                Add note here
+                Add note
               </button>
-              <span
-                key={historyVersion}
-                className="review-progress"
-                aria-live="polite"
-              >
-                {project.tab.notes.length -
-                  uncertainNotes.length +
-                  project.tab.chords.events.filter((chord) => chord.reviewed).length}
-                /
-                {project.tab.notes.length + project.tab.chords.events.length} resolved
-              </span>
             </div>
+            {!reviewMode ? (
+              <button
+                type="button"
+                className="button primary review-launch"
+                disabled={!reviewItems.length}
+                onClick={startReview}
+              >
+                {reviewItems.length
+                  ? `Review · ${reviewItems.length} remaining`
+                  : 'Review complete'}
+              </button>
+            ) : (
+              <div className="review-session-tools" role="group" aria-label="Review session">
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={!reviewItems.length}
+                  onClick={() => moveReviewSelection(-1)}
+                >
+                  Previous
+                </button>
+                <span className="review-remaining" aria-live="polite">
+                  {reviewItems.length
+                    ? `${reviewItems.length} remaining`
+                    : 'Review complete'}
+                </span>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={!reviewItems.length}
+                  onClick={() => moveReviewSelection(1)}
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={finishReview}
+                >
+                  Finish
+                </button>
+              </div>
+            )}
           </section>
 
           <div className="editor-canvas">
@@ -2370,15 +2321,10 @@ function App() {
         onTrash={trashCurrentProject}
       />
 
-      {(notice || error || undoDelete) && (
+      {(notice || error) && (
         <div className={`toast ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}>
           {error ? <Icon name="warning" /> : <Icon name="check" />}
-          <span>{error || notice || 'Note deleted'}</span>
-          {undoDelete && !error && (
-            <button className="toast-action" type="button" onClick={() => void undoNoteDelete()}>
-              Undo
-            </button>
-          )}
+          <span>{error || notice}</span>
           <button
             className="icon-button"
             type="button"
@@ -2386,7 +2332,6 @@ function App() {
             onClick={() => {
               setError('')
               setNotice('')
-              setUndoDelete(null)
             }}
           >
             <Icon name="close" />

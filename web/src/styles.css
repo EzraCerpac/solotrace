@@ -782,38 +782,30 @@ li[data-status='complete'] .stage-dot {
   white-space: nowrap;
 }
 
-.review-count {
-  min-height: 40px;
-  display: inline-flex;
+.review-launch {
+  min-width: 174px;
+  white-space: nowrap;
+}
+
+.review-session-tools {
+  min-width: 0;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--ink-soft);
-  cursor: pointer;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
-.review-count:hover:not(:disabled) {
-  background: var(--oxide-soft);
+.review-session-tools .button {
+  min-height: 36px;
+  padding: 6px 10px;
+}
+
+.review-remaining {
+  min-width: 94px;
   color: var(--ink);
-}
-
-.review-count > span {
-  min-width: 25px;
-  height: 25px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--oxide);
-  color: #fff;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.7rem;
-}
-
-.review-count svg {
-  width: 15px;
+  font-size: 0.72rem;
+  text-align: center;
 }
 
 .editor-canvas {
@@ -1422,6 +1414,14 @@ li[data-status='complete'] .stage-dot {
   cursor: pointer;
 }
 
+.review-reason {
+  margin: -5px 14px 13px;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .review-action-bar {
   position: sticky;
   top: 0;
@@ -1591,11 +1591,6 @@ li[data-status='complete'] .stage-dot {
   border-radius: 4px;
   background: var(--paper);
   cursor: pointer;
-}
-
-.chord-history-button {
-  min-width: auto;
-  padding-inline: 9px;
 }
 
 .token-dialog {
@@ -2436,6 +2431,14 @@ li[data-status='complete'] .stage-dot {
   .shortcut-hint {
     display: none;
   }
+
+  .track-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .review-session-tools {
+    flex: 1 1 100%;
+  }
 }
 
 @media (max-width: 860px) {
@@ -2726,9 +2729,14 @@ li[data-status='complete'] .stage-dot {
     flex: 1;
   }
 
-  .review-count {
+  .review-launch {
     width: 100%;
-    justify-content: center;
+  }
+
+  .review-session-tools {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .draft-action-row > .draft-scope {

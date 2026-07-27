@@ -28,6 +28,22 @@ receive a Developer ID signed and notarized DMG.
 
 The result is an editable estimate. Check uncertain notes against the recording.
 
+## Review a draft
+
+Choose **Review · N remaining** to work through uncertain notes and unreviewed
+chords in time order. SoloTrace loops 0.75 seconds around the current item and
+uses lead audio when available. Finishing restores the prior loop and track.
+
+- `J` / `K`: previous / next
+- `A`: accept and advance
+- `Space`: play / pause
+- `Command-Z`: undo
+- `Shift-Command-Z`: redo
+
+These shortcuts stay inactive while you type in a form field. Save, delete, and
+unknown actions also advance automatically. The reason beside each item names
+what needs checking: pitch, timing, fingering, technique, or chord uncertainty.
+
 ## Back up, restore, and remove projects
 
 Export `SoloTrace bundle` to preserve every tab version and declared audio.

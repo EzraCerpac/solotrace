@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 
 import { Icon } from './Icon'
 import { minimumConfidence, pitchName } from '../music'
+import { noteReviewReasons } from '../review'
 import type { NoteEvent } from '../types'
 
 interface NoteInspectorProps {
@@ -46,6 +47,7 @@ export function NoteInspector({
       reviewed: true,
     })
   }
+  const reviewReasons = noteReviewReasons(draft)
 
   return (
     <aside className="note-inspector" aria-label="Selected note">
@@ -62,6 +64,13 @@ export function NoteInspector({
         <Icon name="play" />
         Hear this note in context
       </button>
+      <p className="review-reason">
+        {draft.reviewed
+          ? 'Reviewed'
+          : reviewReasons.length
+            ? `Check ${reviewReasons.join(', ')}`
+            : 'Marked for review'}
+      </p>
       <div className="review-action-bar">
         {draft.reviewed ? (
           <button type="button" className="button secondary" disabled={saving} onClick={() => onReopen(draft)}>
