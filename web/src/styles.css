@@ -747,6 +747,12 @@ li[data-status='complete'] .stage-dot {
   border-bottom: 1px solid var(--nickel);
 }
 
+.track-source-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .track-switcher {
   display: inline-flex;
   padding: 3px;
@@ -769,6 +775,11 @@ li[data-status='complete'] .stage-dot {
 .track-switcher button.active {
   background: var(--ink);
   color: var(--chalk);
+}
+
+.find-chords-button {
+  min-height: 42px;
+  white-space: nowrap;
 }
 
 .review-count {
@@ -2685,6 +2696,11 @@ li[data-status='complete'] .stage-dot {
     align-items: stretch;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .track-source-tools {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .track-switcher {

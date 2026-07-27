@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { vi } from 'vitest'
 
 import { makeProject } from './test-project'
@@ -42,6 +42,10 @@ beforeEach(() => {
       selected: 'pyin',
       available: { pyin: true, basicPitch: false },
     },
+    chords: {
+      available: true,
+      detail: 'Pinned model verified for offline recognition',
+    },
     cloudReady: false,
     cloud: { configured: false, ready: false },
     privacy: 'local',
@@ -64,6 +68,21 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+test('keeps chord recognition with the open project, not every sidebar row', async () => {
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Late Solo' })
+
+  const projectList = screen.getByRole('navigation', { name: 'Projects' })
+  expect(
+    within(projectList).queryByRole('button', { name: 'Find chords' }),
+  ).not.toBeInTheDocument()
+
+  const projectToolbar = screen.getByRole('region', { name: 'Audio source' })
+  expect(
+    within(projectToolbar).getByRole('button', { name: 'Find chords' }),
+  ).toBeEnabled()
 })
 
 test('defaults a song longer than three minutes to full transcription', async () => {

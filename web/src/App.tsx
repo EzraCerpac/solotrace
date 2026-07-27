@@ -1736,18 +1736,6 @@ function App() {
                 >
                   •••
                 </button>
-                <button
-                  className="button secondary"
-                  type="button"
-                  disabled={processing || !capabilities?.chords?.available}
-                  onClick={() => void createChordDraft()}
-                  title={capabilities?.chords?.detail}
-                >
-                  Find chords
-                </button>
-                {!capabilities?.chords?.available && (
-                  <small>Manual chord editing remains available.</small>
-                )}
               </div>
             ))}
           </nav>
@@ -2008,24 +1996,36 @@ function App() {
             }}
           />
           <section className="track-toolbar" aria-label="Audio source">
-            <div className="track-switcher">
-              {(
-                [
-                  ['original', 'Full mix'],
-                  ['lead', 'Lead'],
-                  ['backing', 'Backing'],
-                ] as Array<[AssetRole, string]>
-              ).map(([role, label]) => (
-                <button
-                  type="button"
-                  key={role}
-                  className={track === role ? 'active' : ''}
-                  disabled={!assets.some((asset) => asset.role === role)}
-                  onClick={() => switchTrack(role)}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="track-source-tools">
+              <div className="track-switcher">
+                {(
+                  [
+                    ['original', 'Full mix'],
+                    ['lead', 'Lead'],
+                    ['backing', 'Backing'],
+                  ] as Array<[AssetRole, string]>
+                ).map(([role, label]) => (
+                  <button
+                    type="button"
+                    key={role}
+                    className={track === role ? 'active' : ''}
+                    disabled={!assets.some((asset) => asset.role === role)}
+                    onClick={() => switchTrack(role)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="button secondary find-chords-button"
+                type="button"
+                disabled={processing || !capabilities?.chords?.available}
+                onClick={() => void createChordDraft()}
+                title={capabilities?.chords?.detail}
+              >
+                <Icon name="spark" />
+                Find chords
+              </button>
             </div>
             <div className="review-tools">
               <button
