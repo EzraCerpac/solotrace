@@ -38,8 +38,8 @@ def normalize_edited_notes(
         )
         alternatives = legal_fingerings(
             note.midi_pitch,
-            project.tab.tuning,
-            project.tab.fret_count,
+            project.tab.sounding_tuning,
+            project.tab.available_fret_count,
         )
         if not alternatives:
             raise ValueError(f"{note.midi_pitch} is outside this guitar's tuning and fret range")

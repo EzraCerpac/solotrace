@@ -596,6 +596,7 @@ def transcribe_pyin(
     rhythm_path: Path | None = None,
     progress: Progress | None = None,
     cancelled: Cancelled | None = None,
+    preferred_fret: int | None = None,
 ) -> TabDocument:
     info = sf.info(lead_path)
     sample_rate = info.samplerate
@@ -669,7 +670,12 @@ def transcribe_pyin(
                 }
             )
         )
-    notes = assign_fingerings(timed_notes, tuning, fret_count)
+    notes = assign_fingerings(
+        timed_notes,
+        tuning,
+        fret_count,
+        preferred_fret=preferred_fret,
+    )
     return TabDocument(
         sample_rate=sample_rate,
         tempo_bpm=tempo,

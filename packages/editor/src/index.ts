@@ -1,5 +1,6 @@
 export * from './exports'
 export * from './fingering'
+export * from './instrument'
 export * from './types'
 export * from './validation'
 export * from './versions'

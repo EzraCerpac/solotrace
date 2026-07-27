@@ -108,8 +108,6 @@ def test_styles_create_versions_without_changing_the_source(
         source_positions = {
             note["id"]: (note["string"], note["fret"]) for note in source_notes
         }
-        changed_ids: set[str] = set()
-
         for mode, name in (
             ("balanced", "Balanced"),
             ("easiest", "Easiest"),
@@ -128,15 +126,23 @@ def test_styles_create_versions_without_changing_the_source(
             assert project["versions"][-1]["name"] == name
             assert project["active_version_id"] != source_id
             for note in project["tab"]["notes"]:
-                moved = source_positions[note["id"]] != (note["string"], note["fret"])
-                if moved:
-                    changed_ids.add(note["id"])
-                    assert note["reviewed"] is False
-                else:
-                    assert note["reviewed"] is True
-                assert note["user_locked"] is False
+                assert source_positions[note["id"]] == (note["string"], note["fret"])
+                assert note["reviewed"] is True
+                assert note["user_locked"] is True
 
-        assert changed_ids
+        response = client.post(
+            f"/api/projects/{DEMO_ID}/versions",
+            json={
+                "expected_revision": project["revision"],
+                "source_version_id": source_id,
+                "mode": "easiest",
+                "lock_policy": "clear",
+                "name": "Start fresh",
+            },
+        )
+        assert response.status_code == 200
+        project = response.json()
+        assert all(not note["user_locked"] for note in project["tab"]["notes"])
         response = client.post(
             f"/api/projects/{DEMO_ID}/versions/{source_id}/activate",
             json={"expected_revision": project["revision"]},

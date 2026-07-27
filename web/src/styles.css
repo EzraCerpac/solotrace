@@ -545,6 +545,34 @@ code {
   font-weight: 500;
 }
 
+.rail-field {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink-soft);
+  font-size: .68rem;
+}
+
+.rail-field input,
+.rail-field select {
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 7px;
+  border: 1px solid var(--nickel);
+  border-radius: 4px;
+  background: var(--chalk);
+  color: var(--ink);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.rail-field-pair {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
 .rail-choice {
   width: 100%;
   min-height: 36px;
@@ -1757,6 +1785,102 @@ li[data-status='complete'] .stage-dot {
   background:
     linear-gradient(rgba(23, 34, 40, 0.026) 1px, transparent 1px) 0 0 / 100% 18px,
     color-mix(in srgb, var(--ocean-soft), var(--chalk) 74%);
+}
+
+.rhythmic-tab {
+  display: block;
+  overflow: visible;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.tab-string {
+  stroke: color-mix(in srgb, var(--ink) 58%, transparent);
+  stroke-width: 1;
+}
+
+.barline {
+  stroke: var(--ink);
+  stroke-width: 1.4;
+}
+
+.bar-number,
+.tab-string-label,
+.time-signature,
+.technique-mark {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.tab-mark {
+  fill: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.time-signature {
+  fill: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.fret-erase {
+  fill: var(--paper);
+}
+
+.fret-number {
+  fill: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.note-stem,
+.note-flag,
+.note-beam,
+.note-tie {
+  fill: none;
+  stroke: var(--ink);
+  stroke-linecap: round;
+  stroke-width: 1.6;
+}
+
+.note-beam {
+  stroke-width: 4;
+}
+
+.duration-dot {
+  fill: var(--ink);
+}
+
+.tab-rest {
+  fill: var(--ink);
+  stroke: var(--ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+}
+
+.rhythmic-note {
+  cursor: pointer;
+  outline: none;
+}
+
+.rhythmic-note:focus .fret-number,
+.rhythmic-note.active .fret-number {
+  fill: var(--accent);
+}
+
+.rhythmic-note:focus .fret-erase {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.rhythmic-playhead {
+  pointer-events: none;
 }
 
 .play-rest-system {

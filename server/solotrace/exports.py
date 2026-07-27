@@ -56,7 +56,7 @@ def ascii_tab(project: Project, width: int = 72) -> str:
             lines[note.string][column + offset] = character
     labels = {
         string: pitch_name(open_pitch)
-        for string, open_pitch in enumerate(reversed(project.tab.tuning), start=1)
+        for string, open_pitch in enumerate(reversed(project.tab.sounding_tuning), start=1)
     }
     result = [f"{project.title} — {project.passage.name}", ""]
     result.extend(
@@ -206,6 +206,8 @@ def musicxml(project: Project) -> bytes:
             ET.SubElement(clef, "line").text = "5"
             staff_details = ET.SubElement(attributes, "staff-details")
             ET.SubElement(staff_details, "staff-lines").text = str(len(project.tab.tuning))
+            if project.tab.capo_fret:
+                ET.SubElement(staff_details, "capo").text = str(project.tab.capo_fret)
             for line, open_pitch in enumerate(project.tab.tuning, start=1):
                 tuning = ET.SubElement(staff_details, "staff-tuning", line=str(line))
                 step, alter, octave = _pitch_parts(open_pitch)

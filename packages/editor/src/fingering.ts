@@ -124,9 +124,14 @@ function handPosition(fingering: Fingering): number {
   return fingering.fret === 0 ? 1 : Math.max(1, fingering.fret - 1)
 }
 
-function localCost(fingering: Fingering, weights: Weights): number {
+function localCost(
+  fingering: Fingering,
+  weights: Weights,
+  preferredFret?: number | null,
+): number {
   const openCost = fingering.fret === 0 ? weights.openString : 0
-  const positionCost = Math.abs(handPosition(fingering) - 8) * weights.positionCenter
+  const center = preferredFret ?? 8
+  const positionCost = Math.abs(handPosition(fingering) - center) * weights.positionCenter
   return fingering.fret * weights.fretHeight + openCost + positionCost
 }
 
@@ -155,6 +160,7 @@ export function assignFingerings(
   tuning: readonly number[],
   fretCount: number,
   mode: FingeringMode = 'balanced',
+  preferredFret?: number | null,
 ): NoteEvent[] {
   if (notes.length === 0) return []
   const weights = WEIGHTS[mode]
@@ -177,7 +183,9 @@ export function assignFingerings(
     throw new Error(`MIDI pitch ${notes[missingIndex].midi_pitch} is outside this guitar range`)
   }
 
-  const costs: number[][] = [candidates[0].map((choice) => localCost(choice, weights))]
+  const costs: number[][] = [
+    candidates[0].map((choice) => localCost(choice, weights, preferredFret)),
+  ]
   const parents: number[][] = [candidates[0].map(() => -1)]
 
   const firstTechnique = connectedTechnique(notes[0])
@@ -197,7 +205,7 @@ export function assignFingerings(
         const cost =
           costs[noteIndex - 1][parentIndex] +
           transitionCost(previous, current, weights) +
-          localCost(current, weights)
+          localCost(current, weights, preferredFret)
         if (cost < bestCost) {
           bestCost = cost
           bestParent = parentIndex
@@ -238,7 +246,8 @@ export function assignFingerings(
       .map((candidate) => ({
         ...candidate,
         cost: roundedCost(
-          localCost(candidate, weights) + transitionCost(choice, candidate, weights),
+          localCost(candidate, weights, preferredFret) +
+            transitionCost(choice, candidate, weights),
         ),
       }))
       .sort((left, right) => left.cost - right.cost)

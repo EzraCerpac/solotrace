@@ -55,7 +55,9 @@
       "name": "Balanced",
       "source": "deterministic example",
       "tab": {
+        "capo_fret": 0,
         "fret_count": 22,
+        "preferred_fret": null,
         "notes": [
           {
             "alternatives": [

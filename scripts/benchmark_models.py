@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import subprocess
@@ -23,6 +24,8 @@ from solotrace.audio import (  # noqa: E402
     create_preview_stems,
     transcribe_pyin,
 )
+from solotrace.fingering import assign_fingerings  # noqa: E402
+from solotrace.models import Confidence, NoteEvent  # noqa: E402
 
 TUNING = [40, 45, 50, 55, 59, 64]
 CONDITIONS = ("clean", "mix", "preview", "demucs")
@@ -240,36 +243,66 @@ def prepare_audio_unique(
     return routes, separation_time
 
 
-def product_fingering(pitch: int, previous: tuple[int, int] | None) -> tuple[int, int]:
-    choices = [
-        (string_index, pitch - open_pitch)
-        for string_index, open_pitch in enumerate(TUNING)
-        if 0 <= pitch - open_pitch <= 22
+def add_production_fingering(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Run the same dynamic-programming solver used by shipped drafts."""
+    ordered = sorted(notes, key=lambda item: (item["onset"], item["pitch"]))
+    events = [
+        NoteEvent(
+            id=f"benchmark-{index}",
+            onset_frame=round(float(note["onset"]) * 44_100),
+            end_frame=max(
+                round(float(note["onset"]) * 44_100) + 1,
+                round(float(note.get("offset", note["onset"] + 0.1)) * 44_100),
+            ),
+            audio_onset_s=float(note["onset"]),
+            audio_offset_s=max(
+                float(note["onset"]) + 1 / 44_100,
+                float(note.get("offset", note["onset"] + 0.1)),
+            ),
+            score_tick=round(float(note["onset"]) * 960),
+            duration_ticks=max(
+                1,
+                round(
+                    (float(note.get("offset", note["onset"] + 0.1)) - float(note["onset"]))
+                    * 960
+                ),
+            ),
+            midi_pitch=int(note["pitch"]),
+            string=1,
+            fret=0,
+            confidence=Confidence(pitch=1, onset=1, fingering=0.45, technique=1),
+        )
+        for index, note in enumerate(ordered)
     ]
-    if not choices:
-        return -1, -1
-    if previous is None:
-        return min(choices, key=lambda choice: (choice[1], -choice[0]))
-    return min(
-        choices,
-        key=lambda choice: (
-            abs(choice[1] - previous[1]) + 0.36 * abs(choice[0] - previous[0]),
-            choice[1],
-        ),
-    )
+    arranged = assign_fingerings(events, TUNING, 22, "balanced")
+    return [
+        dict(
+            source,
+            string_index=len(TUNING) - event.string,
+            fret=event.fret,
+        )
+        for source, event in zip(ordered, arranged, strict=True)
+    ]
 
 
-def add_symbolic_fingering(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    previous = None
-    output = []
-    for note in sorted(notes, key=lambda item: (item["onset"], item["pitch"])):
-        string_index, fret = product_fingering(note["pitch"], previous)
-        if string_index < 0:
-            continue
-        current = dict(note, string_index=string_index, fret=fret)
-        output.append(current)
-        previous = (string_index, fret)
-    return output
+def content_hash(paths: list[Path]) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        digest.update(str(path.relative_to(ROOT) if path.is_relative_to(ROOT) else path).encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def config_hash() -> str:
+    payload = {
+        "conditions": CONDITIONS,
+        "transcribers": TRANSCRIBERS,
+        "onset_tolerance_s": ONSET_TOLERANCE_S,
+        "tuning": TUNING,
+        "fret_count": 22,
+        "fingering_mode": "balanced",
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def run_pyin(
@@ -444,6 +477,12 @@ def aggregate(
     }
 
 
+def note_f1(score: dict[str, Any]) -> float:
+    precision = score["matched"] / score["estimated"] if score["estimated"] else 0
+    recall = score["matched"] / score["reference"] if score["reference"] else 0
+    return 2 * precision * recall / (precision + recall) if precision + recall else 0
+
+
 def si_sdr(reference_path: Path, estimate_path: Path) -> float:
     reference, sample_rate = librosa.load(reference_path, sr=None, mono=True)
     estimate, _ = librosa.load(estimate_path, sr=sample_rate, mono=True)
@@ -587,7 +626,7 @@ def main() -> None:
     all_predictions = {
         "pyin": pyin,
         "basic-pitch": {
-            key: dict(value, notes=add_symbolic_fingering(value["notes"]))
+            key: dict(value, notes=add_production_fingering(value["notes"]))
             for key, value in basic_pitch.items()
         },
         "tabcnn": tabcnn,
@@ -619,6 +658,43 @@ def main() -> None:
             )
             per_track[route_name] = scored
 
+    oracle_scored = {
+        track: score_track(truth[track], add_production_fingering(truth[track]))
+        for track in tracks
+    }
+    oracle_reference = sum(item["reference"] for item in oracle_scored.values())
+    oracle_position_matches = sum(
+        item["position_matched"] for item in oracle_scored.values()
+    )
+    oracle_pitch_fingering = {
+        "tab_f1": (
+            oracle_position_matches / oracle_reference if oracle_reference else 0
+        ),
+        "tdr": oracle_position_matches / oracle_reference if oracle_reference else 0,
+        "reference_notes": oracle_reference,
+        "position_matched": oracle_position_matches,
+    }
+    preview_basic = per_track["preview-basic-pitch"]
+    preview_pyin = per_track["preview-pyin"]
+    per_track_delta = {
+        track: note_f1(preview_basic[track]) - note_f1(preview_pyin[track])
+        for track in tracks
+    }
+    macro_delta = float(np.mean(list(per_track_delta.values())))
+    quality_gate = {
+        "preview_basic_pitch_macro_f1_gain_over_pyin": macro_delta,
+        "minimum_track_f1_delta": min(per_track_delta.values()),
+        "required_macro_gain": 0.10,
+        "maximum_allowed_track_drop": 0.03,
+        "passed": macro_delta >= 0.10 and min(per_track_delta.values()) >= -0.03,
+    }
+    if not quality_gate["passed"]:
+        raise RuntimeError(
+            "Offline Basic Pitch quality gate failed: "
+            f"macro gain {macro_delta:.3f}, worst track delta "
+            f"{min(per_track_delta.values()):.3f}"
+        )
+
     separation: dict[str, Any] = {}
     for condition in ("preview", "demucs"):
         values = [
@@ -639,6 +715,22 @@ def main() -> None:
         "license": "CC BY 4.0",
         "tracks": tracks,
         "onset_tolerance_s": ONSET_TOLERANCE_S,
+        "fingerprint": {
+            "dataset_sha256": content_hash(
+                [args.data_dir / f"{track}.jams" for track in tracks]
+            ),
+            "config_sha256": config_hash(),
+            "benchmark_code_sha256": content_hash(
+                [
+                    Path(__file__),
+                    ROOT / "server" / "solotrace" / "fingering.py",
+                    ROOT / "scripts" / "benchmark" / "basic_pitch_worker.py",
+                    ROOT / "scripts" / "benchmark" / "tabcnn_worker.py",
+                ]
+            ),
+        },
+        "oracle_pitch_fingering": oracle_pitch_fingering,
+        "offline_quality_gate": quality_gate,
         "summary": summary,
         "separation": separation,
         "per_track": per_track,

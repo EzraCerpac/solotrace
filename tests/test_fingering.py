@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from solotrace.fingering import (
     assign_fingerings,
@@ -119,7 +122,6 @@ def test_invalid_connected_technique_has_actionable_error() -> None:
             [40, 45, 50, 55, 59, 64],
             22,
         )
-
     previous = note("previous", 64, 0).model_copy(
         update={"string": 1, "fret": 0, "user_locked": True}
     )
@@ -132,3 +134,21 @@ def test_invalid_connected_technique_has_actionable_error() -> None:
             [40, 45, 50, 55, 59, 64],
             22,
         )
+
+
+def test_python_matches_shared_fingering_parity_fixture() -> None:
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "fingering-parity.json").read_text()
+    )
+    phrase = [
+        note(f"parity-{index}", pitch, index * 0.25)
+        for index, pitch in enumerate(fixture["pitches"])
+    ]
+    for mode, expected in fixture["expected"].items():
+        arranged = assign_fingerings(
+            phrase,
+            fixture["tuning"],
+            fixture["fret_count"],
+            mode,
+        )
+        assert [[event.string, event.fret] for event in arranged] == expected

@@ -43,10 +43,10 @@ interface TablatureStaffProps {
 }
 
 function noteLabel(note: NoteEvent): string {
-  const confidence = Math.round(minimumConfidence(note.confidence) * 100)
+  const ambiguity = Math.round((1 - minimumConfidence(note.confidence)) * 100)
   const technique = note.techniques.length ? `, ${note.techniques.join(', ')}` : ''
   const review = note.reviewed ? ', reviewed' : ''
-  return `${pitchName(note.midi_pitch)}, string ${note.string}, fret ${note.fret}, ${confidence}% confidence${technique}${review}`
+  return `${pitchName(note.midi_pitch)}, string ${note.string}, fret ${note.fret}, ambiguity ${ambiguity} out of 100${technique}${review}`
 }
 
 function RestGlyph({ x, value }: { x: number; value: RestValue }) {

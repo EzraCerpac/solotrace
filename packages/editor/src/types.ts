@@ -1,6 +1,7 @@
 export type AssetRole = 'original' | 'lead' | 'backing'
 export type ExportFormat = 'json' | 'musicxml' | 'midi' | 'ascii'
 export type FingeringMode = 'balanced' | 'easiest' | 'position'
+export type LockPolicy = 'preserve' | 'clear'
 export type ProjectOrigin = 'local' | 'example' | 'saved-example'
 
 export interface Confidence {
@@ -47,7 +48,9 @@ export interface TabDocument {
   tempo_bpm: number
   time_signature: [number, number]
   tuning: number[]
+  capo_fret: number
   fret_count: number
+  preferred_fret: number | null
   sync_anchors: SyncAnchor[]
   notes: NoteEvent[]
 }
@@ -161,6 +164,7 @@ export interface RefingerProjectRequest {
   sourceVersionId: string
   mode: FingeringMode
   name?: string
+  lockPolicy?: LockPolicy
 }
 
 export type VersionAction =

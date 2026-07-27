@@ -1,7 +1,12 @@
 # Privacy notice
 
-SoloTrace stores projects locally in the current macOS user account. It has no
-accounts, telemetry, analytics, billing, hosted backend, or automatic updater.
+The SoloTrace macOS app stores projects locally in the current macOS user
+account. The desktop app has no accounts, telemetry, analytics, billing, or
+automatic updater.
+
+The separate hosted SoloTrace studio uses browser-local storage for unsaved
+work. If a user signs in and explicitly saves a copy, the document is stored in
+Cloudflare D1. Hosted Studio does not accept or process personal audio.
 
 Offline preview, transcription, fingering, editing, playback, exports, and
 diagnostic generation run locally. A diagnostic bundle is saved only when the

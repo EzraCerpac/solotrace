@@ -42,6 +42,9 @@ describe('Play tab layout', () => {
     const phone = buildPlaySystems(project, 340).filter(
       (system) => system.kind === 'tab',
     )
+    const tablet = buildPlaySystems(project, 700).filter(
+      (system) => system.kind === 'tab',
+    )
 
     expect(desktop).toHaveLength(2)
     expect(desktop[0].kind === 'tab' && desktop[0].measures).toHaveLength(4)
@@ -49,6 +52,7 @@ describe('Play tab layout', () => {
     phone.forEach((system) => {
       expect(system.kind === 'tab' && system.measures).toHaveLength(1)
     })
+    expect(tablet[0].kind === 'tab' && tablet[0].measures).toHaveLength(2)
   })
 
   it('marks short quantized gaps with standard sixteenth rests', () => {

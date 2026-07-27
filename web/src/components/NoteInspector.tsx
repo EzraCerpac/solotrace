@@ -13,6 +13,8 @@ interface NoteInspectorProps {
   onDelete: (note: NoteEvent) => void
   onReopen: (note: NoteEvent) => void
   onAudition: (note: NoteEvent) => void
+  rangeStart?: number
+  rangeEnd?: number
 }
 
 const techniqueOptions = ['bend', 'vibrato', 'slide', 'hammer-on', 'pull-off']
@@ -26,6 +28,8 @@ export function NoteInspector({
   onDelete,
   onReopen,
   onAudition,
+  rangeStart = 0,
+  rangeEnd = Math.max(note.audio_offset_s + 1, 1),
 }: NoteInspectorProps) {
   const [draft, setDraft] = useState(note)
 
@@ -38,7 +42,7 @@ export function NoteInspector({
     onSave({
       ...draft,
       audio_offset_s: Math.max(draft.audio_onset_s + 0.01, draft.audio_offset_s),
-      user_locked: false,
+      user_locked: true,
       reviewed: true,
     })
   }
@@ -155,6 +159,36 @@ export function NoteInspector({
               />
             </label>
           </div>
+          <div className="timing-handles" aria-label="Drag note timing handles">
+            <label>
+              Drag onset
+              <input
+                type="range"
+                min={rangeStart}
+                max={Math.max(rangeStart + 0.01, draft.audio_offset_s - 0.01)}
+                step="0.01"
+                disabled={saving}
+                value={draft.audio_onset_s}
+                onChange={(event) =>
+                  setDraft({ ...draft, audio_onset_s: Number(event.target.value) })
+                }
+              />
+            </label>
+            <label>
+              Drag end
+              <input
+                type="range"
+                min={draft.audio_onset_s + 0.01}
+                max={rangeEnd}
+                step="0.01"
+                disabled={saving}
+                value={draft.audio_offset_s}
+                onChange={(event) =>
+                  setDraft({ ...draft, audio_offset_s: Number(event.target.value) })
+                }
+              />
+            </label>
+          </div>
           <label>
             MIDI pitch
             <input
@@ -192,15 +226,15 @@ export function NoteInspector({
         </fieldset>
         <fieldset>
           <legend>
-            Confidence
-            <span>{Math.round(minimumConfidence(draft.confidence) * 100)}% minimum</span>
+            Ambiguity
+            <span>{Math.round((1 - minimumConfidence(draft.confidence)) * 100)} / 100</span>
           </legend>
           <div className="confidence-list">
             {Object.entries(draft.confidence).map(([label, value]) => (
               <div key={label}>
                 <span>{label}</span>
                 <progress max="1" value={value} />
-                <code>{Math.round(value * 100)}%</code>
+                <code>{Math.round((1 - value) * 100)}</code>
               </div>
             ))}
           </div>

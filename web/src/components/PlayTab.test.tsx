@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { vi } from 'vitest'
 
 import { makeNote, makeProject } from '../test-project'
@@ -50,4 +50,31 @@ test('auto-follow waits for playback to cross into another system', () => {
   })
 
   vi.restoreAllMocks()
+})
+
+test('rhythmic notes seek and use roving keyboard focus', () => {
+  const onSeek = vi.fn()
+  render(
+    <PlayTab
+      project={makeProject({
+        duration: 2,
+        passage: { name: 'Solo 1', start_s: 0, end_s: 2 },
+        notes: [
+          makeNote('first', 0.2, 0.5),
+          makeNote('second', 0.8, 1.1),
+        ],
+      })}
+      currentTime={0}
+      playing={false}
+      onSeek={onSeek}
+    />,
+  )
+  const notes = screen.getAllByRole('button', { name: /Jump to note/ })
+  fireEvent.click(notes[1])
+  expect(onSeek).toHaveBeenCalledWith(0.8)
+
+  notes[0].focus()
+  fireEvent.keyDown(notes[0], { key: 'ArrowRight' })
+  expect(notes[0]).toHaveAttribute('tabindex', '-1')
+  expect(notes[1]).toHaveAttribute('tabindex', '0')
 })

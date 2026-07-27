@@ -163,6 +163,7 @@ export class DesktopEditorClient implements EditorClientAdapter {
         request.sourceVersionId,
         request.mode,
         request.name,
+        request.lockPolicy,
       ),
     )
   }

@@ -181,6 +181,7 @@ export class HostedEditorClient implements EditorClientAdapter {
       versionId: nextVersionId(project, request.sourceVersionId, request.mode),
       name: request.name?.trim() || humanMode(request.mode),
       createdAt: this.#now(),
+      lockPolicy: request.lockPolicy,
     });
     return this.#persistMutation(updated, request.expectedRevision);
   }

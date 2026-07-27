@@ -74,7 +74,9 @@ class TabDocument(StrictModel):
     tempo_bpm: float = Field(default=120, gt=20, le=400)
     time_signature: tuple[int, int] = (4, 4)
     tuning: list[int] = Field(default_factory=lambda: [40, 45, 50, 55, 59, 64])
+    capo_fret: int = Field(default=0, ge=0, le=12)
     fret_count: int = Field(default=22, ge=12, le=36)
+    preferred_fret: int | None = Field(default=None, ge=0, le=36)
     sync_anchors: list[SyncAnchor] = Field(default_factory=list, max_length=5000)
     notes: list[NoteEvent] = Field(default_factory=list, max_length=10000)
 
@@ -91,9 +93,21 @@ class TabDocument(StrictModel):
 
     @model_validator(mode="after")
     def validate_instrument_range(self) -> TabDocument:
-        if max(self.tuning) + self.fret_count > 127:
+        if self.capo_fret >= self.fret_count:
+            raise ValueError("capo must leave at least one playable fret")
+        if self.preferred_fret is not None and self.preferred_fret > self.available_fret_count:
+            raise ValueError("preferred fret exceeds the available fretboard")
+        if max(self.sounding_tuning) + self.available_fret_count > 127:
             raise ValueError("tuning plus fret count exceeds the MIDI range")
         return self
+
+    @property
+    def sounding_tuning(self) -> list[int]:
+        return [pitch + self.capo_fret for pitch in self.tuning]
+
+    @property
+    def available_fret_count(self) -> int:
+        return self.fret_count - self.capo_fret
 
 
 class StageState(StrEnum):
@@ -295,7 +309,9 @@ class ProcessRequest(StrictModel):
     start_s: float = Field(ge=0)
     end_s: float = Field(gt=0)
     tuning: list[int] = Field(default_factory=lambda: [40, 45, 50, 55, 59, 64])
+    capo_fret: int = Field(default=0, ge=0, le=12)
     fret_count: int = Field(default=22, ge=12, le=36)
+    preferred_fret: int | None = Field(default=None, ge=0, le=36)
     expected_revision: int = Field(ge=1)
     engine: ProcessingEngine = "preview"
     cloud_consent: bool = False
@@ -308,7 +324,14 @@ class ProcessRequest(StrictModel):
             raise ValueError("MVSep selections must be no longer than 10 minutes")
         if self.engine == "mvsep" and not self.cloud_consent:
             raise ValueError("Confirm MVSep cloud processing before creating this draft")
-        if max(self.tuning) + self.fret_count > 127:
+        if len(self.tuning) != 6:
+            raise ValueError("SoloTrace drafts require a six-string guitar")
+        if self.capo_fret >= self.fret_count:
+            raise ValueError("capo must leave at least one playable fret")
+        available_frets = self.fret_count - self.capo_fret
+        if self.preferred_fret is not None and self.preferred_fret > available_frets:
+            raise ValueError("preferred fret exceeds the available fretboard")
+        if max(self.tuning) + self.capo_fret + available_frets > 127:
             raise ValueError("tuning plus fret count exceeds the MIDI range")
         return self
 
@@ -340,6 +363,7 @@ class VersionCreateRequest(ProjectMutationRequest):
     source_version_id: str = Field(min_length=1, max_length=96)
     name: str | None = Field(default=None, min_length=1, max_length=80)
     mode: FingeringMode | None = None
+    lock_policy: Literal["preserve", "clear"] = "preserve"
 
 
 class VersionRenameRequest(ProjectMutationRequest):

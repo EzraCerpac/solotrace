@@ -98,9 +98,14 @@ def _hand_position(fingering: Fingering) -> float:
     return max(1, fingering.fret - 1)
 
 
-def _local_cost(fingering: Fingering, weights: Weights) -> float:
+def _local_cost(
+    fingering: Fingering,
+    weights: Weights,
+    preferred_fret: int | None = None,
+) -> float:
     open_cost = weights.open_string if fingering.fret == 0 else 0
-    position_cost = abs(_hand_position(fingering) - 8) * weights.position_center
+    center = preferred_fret if preferred_fret is not None else 8
+    position_cost = abs(_hand_position(fingering) - center) * weights.position_center
     return fingering.fret * weights.fret_height + open_cost + position_cost
 
 
@@ -120,6 +125,7 @@ def assign_fingerings(
     tuning: list[int],
     fret_count: int,
     mode: FingeringMode = "balanced",
+    preferred_fret: int | None = None,
 ) -> list[NoteEvent]:
     if not notes:
         return []
@@ -153,7 +159,9 @@ def assign_fingerings(
     first_technique = connected_technique(notes[0])
     if first_technique is not None:
         raise ValueError(f"Note {notes[0].id} cannot start with {first_technique}")
-    costs.append([_local_cost(choice, weights) for choice in candidates[0]])
+    costs.append(
+        [_local_cost(choice, weights, preferred_fret) for choice in candidates[0]]
+    )
     parents.append([-1] * len(candidates[0]))
 
     for note_index in range(1, len(notes)):
@@ -171,7 +179,7 @@ def assign_fingerings(
                 cost = (
                     costs[note_index - 1][parent_index]
                     + _transition_cost(previous, current, weights)
-                    + _local_cost(current, weights)
+                    + _local_cost(current, weights, preferred_fret)
                 )
                 if cost < best_cost:
                     best_cost = cost
@@ -224,7 +232,7 @@ def assign_fingerings(
                 candidate.model_copy(
                     update={
                         "cost": round(
-                            _local_cost(candidate, weights)
+                            _local_cost(candidate, weights, preferred_fret)
                             + _transition_cost(choice, candidate, weights),
                             3,
                         )
