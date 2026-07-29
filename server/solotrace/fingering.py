@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import inf
 from typing import Literal
 
 from .models import Fingering, NoteEvent
@@ -9,6 +8,7 @@ from .models import Fingering, NoteEvent
 FingeringMode = Literal["balanced", "easiest", "position"]
 ConnectedTechnique = Literal["hammer-on", "pull-off", "slide"]
 SLIDE_TECHNIQUES = {"slide", "slide-up", "slide-down"}
+Voicing = tuple[Fingering, ...]
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,13 @@ class Weights:
     fret_height: float
     open_string: float
     position_center: float
+
+
+@dataclass(frozen=True)
+class GroupState:
+    cost: float
+    choices: Voicing
+    parent_group_index: int
 
 
 WEIGHTS: dict[FingeringMode, Weights] = {
@@ -55,15 +62,23 @@ def _connection_is_playable(
     return current.fret != previous.fret
 
 
+def _chronological_notes(notes: list[NoteEvent]) -> list[tuple[int, NoteEvent]]:
+    return sorted(
+        enumerate(notes),
+        key=lambda indexed: (indexed[1].onset_frame, indexed[0]),
+    )
+
+
 def validate_connected_technique_fingerings(notes: list[NoteEvent]) -> None:
     """Validate same-string, directional connections in a finished phrase."""
-    for index, note in enumerate(notes):
+    chronological = [note for _, note in _chronological_notes(notes)]
+    for index, note in enumerate(chronological):
         technique = connected_technique(note)
         if technique is None:
             continue
         if index == 0:
             raise ValueError(f"Note {note.id} cannot start with {technique}")
-        if not _connection_is_playable(technique, notes[index - 1], note):
+        if not _connection_is_playable(technique, chronological[index - 1], note):
             raise ValueError(
                 f"{technique} on note {note.id} must connect from the previous "
                 "note on the same string"
@@ -120,6 +135,139 @@ def _transition_cost(previous: Fingering, current: Fingering, weights: Weights) 
     )
 
 
+def _note_groups(notes: list[NoteEvent]) -> list[tuple[int, int]]:
+    groups: list[tuple[int, int]] = []
+    start = 0
+    for index in range(1, len(notes) + 1):
+        if index == len(notes) or notes[index].onset_frame != notes[start].onset_frame:
+            groups.append((start, index))
+            start = index
+    return groups
+
+
+def _keep_lower_cost(
+    states: dict[tuple[int, int], GroupState],
+    key: tuple[int, int],
+    candidate: GroupState,
+) -> None:
+    current = states.get(key)
+    if current is None or candidate.cost < current.cost:
+        states[key] = candidate
+
+
+def _group_states(
+    notes: list[NoteEvent],
+    candidates: list[list[Fingering]],
+    start: int,
+    end: int,
+    weights: Weights,
+    preferred_fret: int | None,
+    previous_states: list[GroupState] | None,
+) -> list[GroupState]:
+    """Keep only the cheapest path for each used-string mask and terminal string."""
+    first_technique = connected_technique(notes[start])
+    if previous_states is None and first_technique is not None:
+        raise ValueError(f"Note {notes[start].id} cannot start with {first_technique}")
+
+    layer: dict[tuple[int, int], GroupState] = {}
+    for choice in candidates[start]:
+        used_strings = 1 << (choice.string - 1)
+        key = (used_strings, choice.string)
+        if previous_states is None:
+            _keep_lower_cost(
+                layer,
+                key,
+                GroupState(
+                    cost=_local_cost(choice, weights, preferred_fret),
+                    choices=(choice,),
+                    parent_group_index=-1,
+                ),
+            )
+            continue
+        for parent_index, previous in enumerate(previous_states):
+            if first_technique is not None and not _connection_is_playable(
+                first_technique,
+                previous.choices[-1],
+                choice,
+            ):
+                continue
+            _keep_lower_cost(
+                layer,
+                key,
+                GroupState(
+                    cost=(
+                        previous.cost
+                        + _transition_cost(previous.choices[-1], choice, weights)
+                        + _local_cost(choice, weights, preferred_fret)
+                    ),
+                    choices=(choice,),
+                    parent_group_index=parent_index,
+                ),
+            )
+
+    if not layer:
+        label = first_technique or "Fingering"
+        raise ValueError(
+            f"{label} on note {notes[start].id} has no playable "
+            "connection from the previous note"
+        )
+
+    for note_index in range(start + 1, end):
+        next_layer: dict[tuple[int, int], GroupState] = {}
+        technique = connected_technique(notes[note_index])
+        for (used_strings, _), state in layer.items():
+            previous = state.choices[-1]
+            for choice in candidates[note_index]:
+                string_bit = 1 << (choice.string - 1)
+                if used_strings & string_bit:
+                    continue
+                if technique is not None and not _connection_is_playable(
+                    technique,
+                    previous,
+                    choice,
+                ):
+                    continue
+                next_state = GroupState(
+                    cost=(
+                        state.cost
+                        + _transition_cost(previous, choice, weights)
+                        + _local_cost(choice, weights, preferred_fret)
+                    ),
+                    choices=(*state.choices, choice),
+                    parent_group_index=state.parent_group_index,
+                )
+                _keep_lower_cost(
+                    next_layer,
+                    (used_strings | string_bit, choice.string),
+                    next_state,
+                )
+        if not next_layer:
+            raise _unplayable_voicing_error(notes, start, end)
+        layer = next_layer
+
+    terminal_states: dict[tuple[int, int], GroupState] = {}
+    for state in layer.values():
+        terminal = state.choices[-1]
+        _keep_lower_cost(
+            terminal_states,
+            (terminal.string, terminal.fret),
+            state,
+        )
+    return list(terminal_states.values())
+
+
+def _unplayable_voicing_error(
+    notes: list[NoteEvent],
+    start: int,
+    end: int,
+) -> ValueError:
+    note_ids = ", ".join(note.id for note in notes[start:end])
+    return ValueError(
+        f"Simultaneous notes {note_ids} at frame {notes[start].onset_frame} "
+        "have no playable voicing on distinct strings"
+    )
+
+
 def assign_fingerings(
     notes: list[NoteEvent],
     tuning: list[int],
@@ -130,8 +278,10 @@ def assign_fingerings(
     if not notes:
         return []
     weights = WEIGHTS[mode]
+    indexed_notes = _chronological_notes(notes)
+    chronological_notes = [note for _, note in indexed_notes]
     candidates: list[list[Fingering]] = []
-    for note in notes:
+    for note in chronological_notes:
         choices = legal_fingerings(note.midi_pitch, tuning, fret_count)
         if note.user_locked:
             locked = next(
@@ -150,71 +300,73 @@ def assign_fingerings(
         candidates.append(choices)
     if any(not choices for choices in candidates):
         missing = next(
-            note.midi_pitch for note, choices in zip(notes, candidates, strict=True) if not choices
+            note.midi_pitch
+            for note, choices in zip(chronological_notes, candidates, strict=True)
+            if not choices
         )
         raise ValueError(f"MIDI pitch {missing} is outside this guitar range")
 
-    costs: list[list[float]] = []
-    parents: list[list[int]] = []
-    first_technique = connected_technique(notes[0])
-    if first_technique is not None:
-        raise ValueError(f"Note {notes[0].id} cannot start with {first_technique}")
-    costs.append(
-        [_local_cost(choice, weights, preferred_fret) for choice in candidates[0]]
+    groups = _note_groups(chronological_notes)
+    group_history: list[list[GroupState]] = []
+    previous_states: list[GroupState] | None = None
+    for start, end in groups:
+        if end - start > len(tuning):
+            raise _unplayable_voicing_error(chronological_notes, start, end)
+        states = _group_states(
+            chronological_notes,
+            candidates,
+            start,
+            end,
+            weights,
+            preferred_fret,
+            previous_states,
+        )
+        group_history.append(states)
+        previous_states = states
+
+    selected = [0] * len(groups)
+    selected[-1] = min(
+        range(len(group_history[-1])),
+        key=lambda index: group_history[-1][index].cost,
     )
-    parents.append([-1] * len(candidates[0]))
+    for group_index in range(len(groups) - 1, 0, -1):
+        selected[group_index - 1] = group_history[group_index][
+            selected[group_index]
+        ].parent_group_index
 
-    for note_index in range(1, len(notes)):
-        technique = connected_technique(notes[note_index])
-        row_costs: list[float] = []
-        row_parents: list[int] = []
-        for current in candidates[note_index]:
-            best_cost = inf
-            best_parent = -1
-            for parent_index, previous in enumerate(candidates[note_index - 1]):
-                if technique is not None and not _connection_is_playable(
-                    technique, previous, current
-                ):
-                    continue
-                cost = (
-                    costs[note_index - 1][parent_index]
-                    + _transition_cost(previous, current, weights)
-                    + _local_cost(current, weights, preferred_fret)
-                )
-                if cost < best_cost:
-                    best_cost = cost
-                    best_parent = parent_index
-            row_costs.append(best_cost)
-            row_parents.append(best_parent)
-        if all(parent < 0 for parent in row_parents):
-            label = technique or "Fingering"
-            raise ValueError(
-                f"{label} on note {notes[note_index].id} has no playable "
-                "connection from the previous note"
-            )
-        costs.append(row_costs)
-        parents.append(row_parents)
-
-    selected = [0] * len(notes)
-    selected[-1] = min(range(len(costs[-1])), key=costs[-1].__getitem__)
-    for note_index in range(len(notes) - 1, 0, -1):
-        selected[note_index - 1] = parents[note_index][selected[note_index]]
+    selected_choices: list[Fingering] = [candidates[0][0]] * len(chronological_notes)
+    group_by_note = [0] * len(chronological_notes)
+    for group_index, (start, end) in enumerate(groups):
+        choices = group_history[group_index][selected[group_index]].choices
+        selected_choices[start:end] = choices
+        group_by_note[start:end] = [group_index] * (end - start)
 
     output: list[NoteEvent] = []
-    for note_index, note in enumerate(notes):
-        choice = candidates[note_index][selected[note_index]]
+    for note_index, note in enumerate(chronological_notes):
+        choice = selected_choices[note_index]
         incoming = connected_technique(note)
-        next_note = notes[note_index + 1] if note_index + 1 < len(notes) else None
+        next_note = (
+            chronological_notes[note_index + 1]
+            if note_index + 1 < len(chronological_notes)
+            else None
+        )
         outgoing = connected_technique(next_note) if next_note is not None else None
+        group_start, group_end = groups[group_by_note[note_index]]
+        sibling_strings = {
+            selected_choices[index].string
+            for index in range(group_start, group_end)
+            if index != note_index
+        }
         viable_candidates = [
             candidate
             for candidate in candidates[note_index]
-            if (
+            if candidate.string not in sibling_strings
+            and (
                 incoming is None
                 or note_index == 0
                 or _connection_is_playable(
                     incoming,
-                    candidates[note_index - 1][selected[note_index - 1]],
+                    selected_choices[note_index - 1],
                     candidate,
                 )
             )
@@ -223,7 +375,7 @@ def assign_fingerings(
                 or _connection_is_playable(
                     outgoing,
                     candidate,
-                    candidates[note_index + 1][selected[note_index + 1]],
+                    selected_choices[note_index + 1],
                 )
             )
         ]
@@ -257,4 +409,7 @@ def assign_fingerings(
                 }
             )
         )
-    return output
+    restored = output.copy()
+    for chronological_index, (original_index, _) in enumerate(indexed_notes):
+        restored[original_index] = output[chronological_index]
+    return restored

@@ -255,6 +255,23 @@ function makeReviewProject(): Project {
   return reviewProject
 }
 
+test('keeps Play disabled and explains why when a project has chords but no tab', async () => {
+  const chordOnlyProject = makeReviewProject()
+  chordOnlyProject.tab.notes = []
+  apiMock.listProjects.mockResolvedValue([chordOnlyProject])
+  apiMock.getProject.mockResolvedValue(chordOnlyProject)
+
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Late Solo' })
+
+  const playModeButton = screen.getByRole('button', {
+    name: 'Play unavailable: transcribe tab first',
+  })
+  expect(playModeButton).toBeDisabled()
+  expect(playModeButton).toHaveAttribute('title', 'Transcribe tab first')
+  expect(playModeButton).toHaveTextContent('Play')
+})
+
 function mockReviewPersistence(initial: Project) {
   let serverProject = initial
   apiMock.patchNotes.mockImplementation(

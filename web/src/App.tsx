@@ -1624,10 +1624,13 @@ function App() {
           </button>
           <button
             type="button"
-            disabled={
-              saving ||
-              (!project.tab.notes.length && !project.tab.chords.events.length)
+            disabled={saving || !project.tab.notes.length}
+            aria-label={
+              project.tab.notes.length
+                ? 'Play'
+                : 'Play unavailable: transcribe tab first'
             }
+            title={project.tab.notes.length ? undefined : 'Transcribe tab first'}
             aria-pressed="false"
             onClick={enterPlayMode}
           >

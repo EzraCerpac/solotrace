@@ -21,7 +21,7 @@ export function SiteHeader({ compact = false }: SiteHeaderProps) {
         href="https://github.com/EzraCerpac/solotrace"
         rel="noreferrer"
       >
-        Desktop app
+        Source · private beta
       </a>
     </header>
   );
