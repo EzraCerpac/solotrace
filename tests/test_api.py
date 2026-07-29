@@ -194,6 +194,11 @@ def test_local_origin_guard_and_reserved_api_routes(tmp_path, monkeypatch) -> No
     monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path))
     with TestClient(app) as client:
         project = client.get(f"/api/projects/{DEMO_ID}").json()
+        local_development = client.post(
+            "/api/definitely-not-a-route",
+            headers={"Origin": "http://127.0.0.1:5173"},
+        )
+        assert local_development.status_code == 405
         blocked = client.post(
             f"/api/projects/{DEMO_ID}/refinger",
             json={

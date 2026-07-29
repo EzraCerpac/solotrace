@@ -61,6 +61,49 @@ def test_packaged_launch_secret_becomes_one_time_http_only_session(
         )
 
 
+def test_packaged_mutations_require_exact_runtime_origin(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runtime_origin = "http://127.0.0.1:43123"
+    monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SOLOTRACE_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("SOLOTRACE_LAUNCH_SECRET", "one-time-launch-secret")
+    monkeypatch.setenv("SOLOTRACE_SESSION_SECRET", "private-session-secret")
+    monkeypatch.setattr("solotrace.api.PACKAGED", True)
+
+    with TestClient(app, base_url=runtime_origin) as client:
+        bootstrap = client.get(
+            "/bootstrap?token=one-time-launch-secret",
+            follow_redirects=False,
+        )
+        assert bootstrap.status_code == 303
+        project = client.get(f"/api/projects/{DEMO_ID}").json()
+        mutation = {
+            "expected_revision": project["revision"],
+            "title": "Exact origin",
+            "artist": project["artist"],
+        }
+
+        missing = client.patch(f"/api/projects/{DEMO_ID}", json=mutation)
+        assert missing.status_code == 403
+
+        cross_port = client.patch(
+            f"/api/projects/{DEMO_ID}",
+            json=mutation,
+            headers={"Origin": "http://127.0.0.1:43124"},
+        )
+        assert cross_port.status_code == 403
+
+        accepted = client.patch(
+            f"/api/projects/{DEMO_ID}",
+            json=mutation,
+            headers={"Origin": runtime_origin},
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["title"] == "Exact origin"
+
+
 def test_keychain_api_receives_secret_without_shell_or_return_value(monkeypatch) -> None:
     saved: list[tuple[str, str, str]] = []
     deleted: list[tuple[str, str]] = []
