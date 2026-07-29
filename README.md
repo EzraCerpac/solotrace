@@ -45,6 +45,8 @@ audio. Only the chosen range is uploaded.
 
 ## Hosted example studio
 
+[Open the live hosted example studio](https://solotrace-app.e-cerpac.chatgpt.site/).
+
 `site/` is a separate public Sites/Vinext shell for learning the editor without
 an API key. It includes Northbound Lights, Switchback Run, and Low Orbit as
 deterministic CC0 projects with exact full-mix, lead, and backing stems.

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-const publicOrigin = process.env.SOLOTRACE_PUBLIC_ORIGIN ?? "https://solotrace-app.openai.site";
+const publicOrigin =
+  process.env.SOLOTRACE_PUBLIC_ORIGIN ?? "https://solotrace-app.e-cerpac.chatgpt.site";
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicOrigin),
