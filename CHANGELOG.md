@@ -8,6 +8,8 @@
   permanent deletion.
 - One chronological keyboard-first review queue for uncertain notes and
   unreviewed chords, with unified undo and redo.
+- Bounded polyphonic fingering keeps simultaneous notes on distinct strings,
+  even for unsorted eight-string input.
 - Refreshed EGSet12 production-path evidence: 0.669 note F1, 0.344 tab F1, and
   0.646 oracle-pitch fingering.
 - Patched Setuptools and Resampy packaging path, verified by bundled A4

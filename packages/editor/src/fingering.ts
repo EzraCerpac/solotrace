@@ -8,6 +8,15 @@ interface Weights {
   positionCenter: number
 }
 
+type Voicing = Fingering[]
+
+interface GroupState {
+  cost: number
+  choices: Voicing
+  parentGroupIndex: number
+  usedStrings: number
+}
+
 const WEIGHTS: Record<FingeringMode, Weights> = {
   balanced: {
     movement: 1,
@@ -65,6 +74,18 @@ function connectionIsPlayable(
   return current.fret !== previous.fret
 }
 
+function chronologicalNotes(
+  notes: readonly NoteEvent[],
+): Array<{ note: NoteEvent; originalIndex: number }> {
+  return notes
+    .map((note, originalIndex) => ({ note, originalIndex }))
+    .sort(
+      (left, right) =>
+        left.note.onset_frame - right.note.onset_frame ||
+        left.originalIndex - right.originalIndex,
+    )
+}
+
 /**
  * Check whether replacing one note's position keeps both its incoming
  * connection and the following note's incoming connection playable.
@@ -76,23 +97,28 @@ export function fingeringPreservesConnectedTechniques(
 ): boolean {
   const note = notes[noteIndex]
   if (!note) return false
+  const chronological = chronologicalNotes(notes)
+  const chronologicalIndex = chronological.findIndex(
+    ({ originalIndex }) => originalIndex === noteIndex,
+  )
   const candidate = { ...note, ...fingering }
   const incoming = connectedTechnique(candidate)
-  const previous = notes[noteIndex - 1]
+  const previous = chronological[chronologicalIndex - 1]?.note
   if (incoming && (!previous || !connectionIsPlayable(incoming, previous, candidate))) {
     return false
   }
 
-  const next = notes[noteIndex + 1]
+  const next = chronological[chronologicalIndex + 1]?.note
   const outgoing = next && connectedTechnique(next)
   return !outgoing || connectionIsPlayable(outgoing, candidate, next)
 }
 
 export function validateConnectedTechniqueFingerings(notes: readonly NoteEvent[]): void {
-  notes.forEach((note, index) => {
+  const chronological = chronologicalNotes(notes).map(({ note }) => note)
+  chronological.forEach((note, index) => {
     const technique = connectedTechnique(note)
     if (!technique) return
-    const previous = notes[index - 1]
+    const previous = chronological[index - 1]
     if (!previous) {
       throw new Error(`Note ${note.id} cannot start with ${technique}`)
     }
@@ -154,6 +180,133 @@ function roundedCost(value: number): number {
   return Math.round((value + Number.EPSILON) * 1000) / 1000
 }
 
+function noteGroups(notes: readonly NoteEvent[]): Array<[number, number]> {
+  const groups: Array<[number, number]> = []
+  let start = 0
+  for (let index = 1; index <= notes.length; index += 1) {
+    if (index === notes.length || notes[index].onset_frame !== notes[start].onset_frame) {
+      groups.push([start, index])
+      start = index
+    }
+  }
+  return groups
+}
+
+function keepLowerCost(
+  states: Map<string, GroupState>,
+  key: string,
+  candidate: GroupState,
+): void {
+  const current = states.get(key)
+  if (!current || candidate.cost < current.cost) states.set(key, candidate)
+}
+
+function groupStates(
+  notes: readonly NoteEvent[],
+  candidates: readonly Fingering[][],
+  start: number,
+  end: number,
+  weights: Weights,
+  preferredFret?: number | null,
+  previousStates?: readonly GroupState[],
+): GroupState[] {
+  // Each layer keeps only the cheapest path per used-string mask and terminal string.
+  const firstTechnique = connectedTechnique(notes[start])
+  if (!previousStates && firstTechnique) {
+    throw new Error(`Note ${notes[start].id} cannot start with ${firstTechnique}`)
+  }
+
+  let layer = new Map<string, GroupState>()
+  for (const choice of candidates[start]) {
+    const usedStrings = 1 << (choice.string - 1)
+    const key = `${usedStrings}:${choice.string}`
+    if (!previousStates) {
+      keepLowerCost(layer, key, {
+        cost: localCost(choice, weights, preferredFret),
+        choices: [choice],
+        parentGroupIndex: -1,
+        usedStrings,
+      })
+      continue
+    }
+    previousStates.forEach((previous, parentGroupIndex) => {
+      if (
+        firstTechnique &&
+        !connectionIsPlayable(firstTechnique, previous.choices.at(-1)!, choice)
+      ) {
+        return
+      }
+      keepLowerCost(layer, key, {
+        cost:
+          previous.cost +
+          transitionCost(previous.choices.at(-1)!, choice, weights) +
+          localCost(choice, weights, preferredFret),
+        choices: [choice],
+        parentGroupIndex,
+        usedStrings,
+      })
+    })
+  }
+
+  if (layer.size === 0) {
+    throw new Error(
+      `${firstTechnique ?? 'Fingering'} on note ${notes[start].id} has no playable connection from the previous note`,
+    )
+  }
+
+  for (let noteIndex = start + 1; noteIndex < end; noteIndex += 1) {
+    const nextLayer = new Map<string, GroupState>()
+    const technique = connectedTechnique(notes[noteIndex])
+    for (const state of layer.values()) {
+      const { usedStrings } = state
+      const previous = state.choices.at(-1)!
+      for (const choice of candidates[noteIndex]) {
+        const stringBit = 1 << (choice.string - 1)
+        if ((usedStrings & stringBit) !== 0) continue
+        if (technique && !connectionIsPlayable(technique, previous, choice)) continue
+        keepLowerCost(
+          nextLayer,
+          `${usedStrings | stringBit}:${choice.string}`,
+          {
+            cost:
+              state.cost +
+              transitionCost(previous, choice, weights) +
+              localCost(choice, weights, preferredFret),
+            choices: [...state.choices, choice],
+            parentGroupIndex: state.parentGroupIndex,
+            usedStrings: usedStrings | stringBit,
+          },
+        )
+      }
+    }
+    if (nextLayer.size === 0) throw unplayableVoicingError(notes, start, end)
+    layer = nextLayer
+  }
+
+  const terminalStates = new Map<string, GroupState>()
+  for (const state of layer.values()) {
+    const terminal = state.choices.at(-1)!
+    keepLowerCost(
+      terminalStates,
+      `${terminal.string}:${terminal.fret}`,
+      state,
+    )
+  }
+  return [...terminalStates.values()]
+}
+
+function unplayableVoicingError(
+  notes: readonly NoteEvent[],
+  start: number,
+  end: number,
+): Error {
+  const noteIds = notes.slice(start, end).map(({ id }) => id).join(', ')
+  return new Error(
+    `Simultaneous notes ${noteIds} at frame ${notes[start].onset_frame} ` +
+      'have no playable voicing on distinct strings',
+  )
+}
+
 /** Deterministic dynamic-programming fingering assignment. Input notes stay untouched. */
 export function assignFingerings(
   notes: readonly NoteEvent[],
@@ -164,7 +317,9 @@ export function assignFingerings(
 ): NoteEvent[] {
   if (notes.length === 0) return []
   const weights = WEIGHTS[mode]
-  const candidates = notes.map((note) => {
+  const indexedNotes = chronologicalNotes(notes)
+  const arrangedNotes = indexedNotes.map(({ note }) => note)
+  const candidates = arrangedNotes.map((note) => {
     let choices = legalFingerings(note.midi_pitch, tuning, fretCount)
     if (note.user_locked) {
       const locked = choices.find(
@@ -180,68 +335,70 @@ export function assignFingerings(
 
   const missingIndex = candidates.findIndex((choices) => choices.length === 0)
   if (missingIndex >= 0) {
-    throw new Error(`MIDI pitch ${notes[missingIndex].midi_pitch} is outside this guitar range`)
+    throw new Error(
+      `MIDI pitch ${arrangedNotes[missingIndex].midi_pitch} is outside this guitar range`,
+    )
   }
 
-  const costs: number[][] = [
-    candidates[0].map((choice) => localCost(choice, weights, preferredFret)),
-  ]
-  const parents: number[][] = [candidates[0].map(() => -1)]
-
-  const firstTechnique = connectedTechnique(notes[0])
-  if (firstTechnique) {
-    throw new Error(`Note ${notes[0].id} cannot start with ${firstTechnique}`)
-  }
-
-  for (let noteIndex = 1; noteIndex < notes.length; noteIndex += 1) {
-    const technique = connectedTechnique(notes[noteIndex])
-    const rowCosts: number[] = []
-    const rowParents: number[] = []
-    for (const current of candidates[noteIndex]) {
-      let bestCost = Number.POSITIVE_INFINITY
-      let bestParent = -1
-      candidates[noteIndex - 1].forEach((previous, parentIndex) => {
-        if (technique && !connectionIsPlayable(technique, previous, current)) return
-        const cost =
-          costs[noteIndex - 1][parentIndex] +
-          transitionCost(previous, current, weights) +
-          localCost(current, weights, preferredFret)
-        if (cost < bestCost) {
-          bestCost = cost
-          bestParent = parentIndex
-        }
-      })
-      rowCosts.push(bestCost)
-      rowParents.push(bestParent)
+  const groups = noteGroups(arrangedNotes)
+  const groupHistory: GroupState[][] = []
+  let previousStates: GroupState[] | undefined
+  for (const [start, end] of groups) {
+    if (end - start > tuning.length) {
+      throw unplayableVoicingError(arrangedNotes, start, end)
     }
-    if (rowParents.every((parent) => parent < 0)) {
-      throw new Error(
-        `${technique ?? 'Fingering'} on note ${notes[noteIndex].id} has no playable connection from the previous note`,
-      )
-    }
-    costs.push(rowCosts)
-    parents.push(rowParents)
+    const states = groupStates(
+      arrangedNotes,
+      candidates,
+      start,
+      end,
+      weights,
+      preferredFret,
+      previousStates,
+    )
+    groupHistory.push(states)
+    previousStates = states
   }
 
-  const selected = Array<number>(notes.length).fill(0)
-  selected[selected.length - 1] = costs.at(-1)!.reduce(
-    (best, cost, index, row) => (cost < row[best] ? index : best),
+  const selected = Array<number>(groups.length).fill(0)
+  selected[selected.length - 1] = groupHistory.at(-1)!.reduce(
+    (best, state, index, row) => (state.cost < row[best].cost ? index : best),
     0,
   )
-  for (let noteIndex = notes.length - 1; noteIndex > 0; noteIndex -= 1) {
-    selected[noteIndex - 1] = parents[noteIndex][selected[noteIndex]]
+  for (let groupIndex = groups.length - 1; groupIndex > 0; groupIndex -= 1) {
+    selected[groupIndex - 1] =
+      groupHistory[groupIndex][selected[groupIndex]].parentGroupIndex
   }
 
-  const selectedNotes = notes.map((event, index) => ({
+  const selectedChoices = Array<Fingering>(arrangedNotes.length)
+  const groupByNote = Array<number>(arrangedNotes.length)
+  groups.forEach(([start, end], groupIndex) => {
+    const choices = groupHistory[groupIndex][selected[groupIndex]].choices
+    for (let noteIndex = start; noteIndex < end; noteIndex += 1) {
+      selectedChoices[noteIndex] = choices[noteIndex - start]
+      groupByNote[noteIndex] = groupIndex
+    }
+  })
+
+  const selectedNotes = arrangedNotes.map((event, index) => ({
     ...event,
-    string: candidates[index][selected[index]].string,
-    fret: candidates[index][selected[index]].fret,
+    string: selectedChoices[index].string,
+    fret: selectedChoices[index].fret,
   }))
-  return notes.map((note, noteIndex) => {
-    const choice = candidates[noteIndex][selected[noteIndex]]
+  const output = arrangedNotes.map((note, noteIndex) => {
+    const choice = selectedChoices[noteIndex]
+    const [groupStart, groupEnd] = groups[groupByNote[noteIndex]]
+    const siblingStrings = new Set(
+      selectedChoices
+        .slice(groupStart, groupEnd)
+        .filter((_, groupNoteIndex) => groupNoteIndex + groupStart !== noteIndex)
+        .map(({ string }) => string),
+    )
     const alternatives = candidates[noteIndex]
-      .filter((candidate) =>
-        fingeringPreservesConnectedTechniques(selectedNotes, noteIndex, candidate),
+      .filter(
+        (candidate) =>
+          !siblingStrings.has(candidate.string) &&
+          fingeringPreservesConnectedTechniques(selectedNotes, noteIndex, candidate),
       )
       .map((candidate) => ({
         ...candidate,
@@ -261,4 +418,9 @@ export function assignFingerings(
       confidence: { ...note.confidence, fingering },
     }
   })
+  const restored = Array<NoteEvent>(notes.length)
+  indexedNotes.forEach(({ originalIndex }, chronologicalIndex) => {
+    restored[originalIndex] = output[chronologicalIndex]
+  })
+  return restored
 }

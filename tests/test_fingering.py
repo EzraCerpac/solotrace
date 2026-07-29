@@ -93,6 +93,115 @@ def test_user_locked_fingering_survives_global_refinger() -> None:
     assert (arranged[0].string, arranged[0].fret) == (2, 10)
 
 
+def test_simultaneous_double_stop_uses_distinct_strings_in_every_mode() -> None:
+    phrase = [note("lower", 64, 0), note("upper", 67, 0)]
+
+    for mode in ("balanced", "easiest", "position"):
+        first = assign_fingerings(
+            phrase,
+            [40, 45, 50, 55, 59, 64],
+            22,
+            mode=mode,
+        )
+        second = assign_fingerings(
+            phrase,
+            [40, 45, 50, 55, 59, 64],
+            22,
+            mode=mode,
+        )
+
+        assert first == second
+        assert first[0].string != first[1].string
+        assert all(
+            alternative.string != first[1 - index].string
+            for index, event in enumerate(first)
+            for alternative in event.alternatives
+        )
+
+
+def test_simultaneous_voicing_preserves_locks_and_connected_techniques() -> None:
+    previous = note("previous", 64, 0).model_copy(
+        update={"string": 2, "fret": 5, "user_locked": True}
+    )
+    connected = note("connected", 67, 0.5, ["hammer-on"])
+    sibling = note("sibling", 72, 0.5)
+
+    arranged = assign_fingerings(
+        [previous, connected, sibling],
+        [40, 45, 50, 55, 59, 64],
+        22,
+    )
+
+    validate_connected_technique_fingerings(arranged)
+    assert (arranged[0].string, arranged[0].fret) == (2, 5)
+    assert (arranged[1].string, arranged[1].fret) == (2, 8)
+    assert arranged[2].string != arranged[1].string
+
+
+def test_conflicting_simultaneous_locks_fail_actionably() -> None:
+    lower = note("lower", 64, 0).model_copy(
+        update={"string": 1, "fret": 0, "user_locked": True}
+    )
+    upper = note("upper", 67, 0).model_copy(
+        update={"string": 1, "fret": 3, "user_locked": True}
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Simultaneous notes lower, upper.*distinct strings",
+    ):
+        assign_fingerings(
+            [lower, upper],
+            [40, 45, 50, 55, 59, 64],
+            22,
+        )
+
+    connected_sibling = note("connected-sibling", 67, 0, ["hammer-on"])
+    with pytest.raises(
+        ValueError,
+        match=r"Simultaneous notes lower, connected-sibling.*distinct strings",
+    ):
+        assign_fingerings(
+            [note("lower", 64, 0), connected_sibling],
+            [40, 45, 50, 55, 59, 64],
+            22,
+        )
+
+
+def test_unsorted_notes_are_arranged_chronologically_and_returned_in_input_order() -> None:
+    phrase = [
+        note("early-40", 40, 0),
+        note("later-40", 40, 1, ["pull-off"]),
+        note("early-41", 41, 0),
+    ]
+    original = [event.model_copy(deep=True) for event in phrase]
+
+    arranged = assign_fingerings(phrase, [35, 40, 45, 50], 22)
+
+    assert phrase == original
+    assert [event.id for event in arranged] == [
+        "early-40",
+        "later-40",
+        "early-41",
+    ]
+    assert arranged[0].string != arranged[2].string
+    assert arranged[1].string == arranged[2].string
+    assert arranged[1].fret < arranged[2].fret
+    validate_connected_technique_fingerings(arranged)
+
+
+def test_eight_string_unison_uses_bounded_distinct_string_states() -> None:
+    phrase = [note(f"voice-{index}", 64, 0) for index in range(8)]
+    tuning = [28, 33, 38, 43, 48, 53, 58, 63]
+
+    first = assign_fingerings(phrase, tuning, 36)
+    second = assign_fingerings(phrase, tuning, 36)
+
+    assert first == second
+    assert {event.string for event in first} == set(range(1, 9))
+    assert [event.id for event in first] == [event.id for event in phrase]
+
+
 def test_connected_techniques_constrain_path_and_alternatives() -> None:
     arranged = assign_fingerings(
         [
@@ -145,6 +254,20 @@ def test_python_matches_shared_fingering_parity_fixture() -> None:
         for index, pitch in enumerate(fixture["pitches"])
     ]
     for mode, expected in fixture["expected"].items():
+        arranged = assign_fingerings(
+            phrase,
+            fixture["tuning"],
+            fixture["fret_count"],
+            mode,
+        )
+        assert [[event.string, event.fret] for event in arranged] == expected
+
+    simultaneous = fixture["simultaneous"]
+    phrase = [
+        note(f"simultaneous-{index}", pitch, 0)
+        for index, pitch in enumerate(simultaneous["pitches"])
+    ]
+    for mode, expected in simultaneous["expected"].items():
         arranged = assign_fingerings(
             phrase,
             fixture["tuning"],
