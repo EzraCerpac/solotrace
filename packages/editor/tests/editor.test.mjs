@@ -11,6 +11,7 @@ import {
   deleteChordToUnknown,
   emptyChordTrack,
   exportProject,
+  fingeringPreservesConnectedTechniques,
   isEditorProject,
   legalFingerings,
   mergeChord,
@@ -102,6 +103,111 @@ test('deterministic refingering preserves locks and input', () => {
   assert.throws(
     () => assignFingerings([note('low', 30, 0)], [40, 45, 50, 55, 59, 64], 22),
     /MIDI pitch 30/,
+  )
+})
+
+test('simultaneous double-stops use distinct strings in every mode', () => {
+  const phrase = [note('lower', 64, 0), note('upper', 67, 0)]
+  for (const mode of ['balanced', 'easiest', 'position']) {
+    const first = assignFingerings(phrase, [40, 45, 50, 55, 59, 64], 22, mode)
+    const second = assignFingerings(phrase, [40, 45, 50, 55, 59, 64], 22, mode)
+    assert.deepEqual(first, second)
+    assert.notEqual(first[0].string, first[1].string)
+    first.forEach((event, index) => {
+      event.alternatives.forEach((alternative) => {
+        assert.notEqual(alternative.string, first[1 - index].string)
+      })
+    })
+  }
+})
+
+test('simultaneous voicings preserve locks and connected techniques', () => {
+  const phrase = [
+    note('previous', 64, 0, { string: 2, fret: 5, user_locked: true }),
+    note('connected', 67, 0.5, { techniques: ['hammer-on'] }),
+    note('sibling', 72, 0.5),
+  ]
+  const arranged = assignFingerings(phrase, [40, 45, 50, 55, 59, 64], 22)
+  validateConnectedTechniqueFingerings(arranged)
+  assert.deepEqual([arranged[0].string, arranged[0].fret], [2, 5])
+  assert.deepEqual([arranged[1].string, arranged[1].fret], [2, 8])
+  assert.notEqual(arranged[2].string, arranged[1].string)
+})
+
+test('conflicting simultaneous locks fail actionably', () => {
+  const phrase = [
+    note('lower', 64, 0, { string: 1, fret: 0, user_locked: true }),
+    note('upper', 67, 0, { string: 1, fret: 3, user_locked: true }),
+  ]
+  assert.throws(
+    () => assignFingerings(phrase, [40, 45, 50, 55, 59, 64], 22),
+    /Simultaneous notes lower, upper.*distinct strings/,
+  )
+
+  assert.throws(
+    () => assignFingerings(
+      [note('lower', 64, 0), note('connected-sibling', 67, 0, {
+        techniques: ['hammer-on'],
+      })],
+      [40, 45, 50, 55, 59, 64],
+      22,
+    ),
+    /Simultaneous notes lower, connected-sibling.*distinct strings/,
+  )
+})
+
+test('unsorted notes use chronology internally and retain exact input order', () => {
+  const phrase = [
+    note('early-40', 40, 0),
+    note('later-40', 40, 1, { techniques: ['pull-off'] }),
+    note('early-41', 41, 0),
+  ]
+  const original = structuredClone(phrase)
+  const arranged = assignFingerings(phrase, [35, 40, 45, 50], 22)
+
+  assert.deepEqual(phrase, original)
+  assert.deepEqual(
+    arranged.map(({ id }) => id),
+    ['early-40', 'later-40', 'early-41'],
+  )
+  assert.notEqual(arranged[0].string, arranged[2].string)
+  assert.equal(arranged[1].string, arranged[2].string)
+  assert.ok(arranged[1].fret < arranged[2].fret)
+  validateConnectedTechniqueFingerings(arranged)
+
+  const invalidConnection = [
+    note('early', 64, 0, { string: 2, fret: 5 }),
+    note('late', 67, 1, {
+      string: 2,
+      fret: 8,
+      techniques: ['hammer-on'],
+    }),
+    note('middle', 64, 0.5, { string: 3, fret: 5 }),
+  ]
+  assert.equal(
+    fingeringPreservesConnectedTechniques(
+      invalidConnection,
+      1,
+      { string: 2, fret: 8 },
+    ),
+    false,
+  )
+})
+
+test('eight-string unison uses bounded distinct-string states', () => {
+  const phrase = Array.from({ length: 8 }, (_, index) => note(`voice-${index}`, 64, 0))
+  const tuning = [28, 33, 38, 43, 48, 53, 58, 63]
+  const first = assignFingerings(phrase, tuning, 36)
+  const second = assignFingerings(phrase, tuning, 36)
+
+  assert.deepEqual(first, second)
+  assert.deepEqual(
+    new Set(first.map(({ string }) => string)),
+    new Set([1, 2, 3, 4, 5, 6, 7, 8]),
+  )
+  assert.deepEqual(
+    first.map(({ id }) => id),
+    phrase.map(({ id }) => id),
   )
 })
 
@@ -299,6 +405,22 @@ test('TypeScript matches the shared fingering parity fixture', () => {
   for (const [mode, expected] of Object.entries(fixture.expected)) {
     const arranged = assignFingerings(
       phrase,
+      fixture.tuning,
+      fixture.fret_count,
+      mode,
+    )
+    assert.deepEqual(
+      arranged.map((event) => [event.string, event.fret]),
+      expected,
+    )
+  }
+
+  const simultaneous = fixture.simultaneous.pitches.map((pitch, index) =>
+    note(`simultaneous-${index}`, pitch, 0),
+  )
+  for (const [mode, expected] of Object.entries(fixture.simultaneous.expected)) {
+    const arranged = assignFingerings(
+      simultaneous,
       fixture.tuning,
       fixture.fret_count,
       mode,

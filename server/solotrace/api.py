@@ -139,7 +139,13 @@ async def protect_local_mutations(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("origin")
-        if origin:
+        runtime_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if PACKAGED and origin != runtime_origin:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "SoloTrace only accepts edits from its local app."},
+            )
+        if not PACKAGED and origin:
             hostname = urlsplit(origin).hostname
             if hostname not in {"127.0.0.1", "localhost", "::1"}:
                 return JSONResponse(

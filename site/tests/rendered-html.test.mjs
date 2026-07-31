@@ -24,6 +24,8 @@ test("bundles the public example gallery", async () => {
   assert.match(source, /Low Orbit/);
   assert.match(source, /no key required/i);
   assert.match(source, /CC0/);
+  assert.match(source, /Source · private beta/);
+  assert.doesNotMatch(source, /Desktop app/);
   assert.doesNotMatch(source, /Your site is taking shape|codex-preview/);
 });
 
@@ -35,9 +37,12 @@ test("bundles a lazy, anonymous example session", async () => {
 });
 
 test("ships the required Sites and social-preview artifacts", async () => {
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
   const hosting = JSON.parse(
     await readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   );
+  assert.match(layout, /https:\/\/solotrace-app\.e-cerpac\.chatgpt\.site/);
+  assert.doesNotMatch(layout, /solotrace-app\.openai\.site/);
   assert.equal(hosting.d1, "DB");
   assert.equal(hosting.r2, null);
   await access(new URL("../public/og.png", import.meta.url));

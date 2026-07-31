@@ -373,9 +373,18 @@ def _write_bundle(
     for version in project.versions:
         version_project = project.model_copy(update={"active_version_id": version.id})
         version_root = f"{project.id}/versions/{version.id}"
-        archive.writestr(f"{version_root}/tab.musicxml", musicxml(version_project))
-        archive.writestr(f"{version_root}/reference.mid", midi(version_project))
-        archive.writestr(f"{version_root}/tab.txt", ascii_tab(version_project))
+        derived_exports = (
+            ("tab.musicxml", musicxml),
+            ("reference.mid", midi),
+            ("tab.txt", ascii_tab),
+        )
+        for filename, render in derived_exports:
+            try:
+                archive.writestr(f"{version_root}/{filename}", render(version_project))
+            except ValueError:
+                # The manifest and audio are the lossless, re-importable bundle.
+                # A notation limitation must not prevent users from backing it up.
+                continue
     for path, archive_name in asset_paths:
         archive.write(path, archive_name)
 

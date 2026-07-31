@@ -95,6 +95,13 @@ export function ChordInspector({
         <Icon name="play" />
         Hear in context
       </button>
+      <p className="review-reason">
+        {chord.reviewed
+          ? 'Reviewed'
+          : chord.model_score === null
+            ? 'Manual chord awaiting review'
+            : `Check chord match · ${Math.round(chord.model_score * 100)}% confidence`}
+      </p>
       <div className="review-action-bar">
         {chord.reviewed ? (
           <button type="button" className="button secondary" disabled={saving} onClick={onReopen}>

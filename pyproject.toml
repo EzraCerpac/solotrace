@@ -32,7 +32,7 @@ desktop = [
   "coremltools==9.0; sys_platform == 'darwin'",
   "pyinstaller>=6.21,<7; sys_platform == 'darwin'",
   "pywebview>=6.1,<7; sys_platform == 'darwin'",
-  "setuptools==80.9.0",
+  "setuptools==83.0.0",
 ]
 
 [project.scripts]
@@ -54,6 +54,9 @@ packages = ["server/solotrace"]
 # TensorFlow backends are unused and otherwise pollute the universal lock with
 # vulnerable, non-shipped Keras and protobuf versions.
 exclude-dependencies = ["tensorflow", "tensorflow-macos"]
+# Basic Pitch 0.4.0 unnecessarily caps resampy below 0.4.3. That maintenance
+# release replaces removed pkg_resources calls without changing its public API.
+override-dependencies = ["resampy==0.4.3"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

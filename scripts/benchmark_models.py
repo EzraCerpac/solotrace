@@ -31,6 +31,9 @@ TUNING = [40, 45, 50, 55, 59, 64]
 CONDITIONS = ("clean", "mix", "preview", "demucs")
 TRANSCRIBERS = ("pyin", "basic-pitch", "tabcnn")
 ONSET_TOLERANCE_S = 0.05
+BETA_ROUTE = "demucs-basic-pitch"
+BETA_NOTE_F1_BASELINE = 0.666
+MAX_BETA_NOTE_F1_REGRESSION = 0.02
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +51,11 @@ def parse_args() -> argparse.Namespace:
         default=ROOT / ".benchmarks" / "model-benchmark",
     )
     parser.add_argument("--limit", type=int, default=12)
+    parser.add_argument(
+        "--publish-existing",
+        action="store_true",
+        help="Publish the existing work-dir results without rerunning inference.",
+    )
     return parser.parse_args()
 
 
@@ -245,7 +253,18 @@ def prepare_audio_unique(
 
 def add_production_fingering(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Run the same dynamic-programming solver used by shipped drafts."""
-    ordered = sorted(notes, key=lambda item: (item["onset"], item["pitch"]))
+    ordered = sorted(
+        (
+            note
+            for note in notes
+            if float(note.get("offset", note["onset"] + 0.1)) - float(note["onset"])
+            >= 0.05
+            and any(
+                0 <= int(note["pitch"]) - open_pitch <= 22 for open_pitch in TUNING
+            )
+        ),
+        key=lambda item: (item["onset"], item["pitch"]),
+    )
     events = [
         NoteEvent(
             id=f"benchmark-{index}",
@@ -293,6 +312,21 @@ def content_hash(paths: list[Path]) -> str:
     return digest.hexdigest()
 
 
+def tree_hash(path: Path) -> str:
+    return content_hash([item for item in path.rglob("*") if item.is_file()])
+
+
+def source_revision() -> str:
+    result = subprocess.run(
+        ["jj", "log", "-r", "@", "--no-graph", "-T", "commit_id"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
 def config_hash() -> str:
     payload = {
         "conditions": CONDITIONS,
@@ -303,6 +337,19 @@ def config_hash() -> str:
         "fingering_mode": "balanced",
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def beta_note_f1_gate(summary: list[dict[str, Any]]) -> dict[str, Any]:
+    actual = next(row["note_f1"] for row in summary if row["route"] == BETA_ROUTE)
+    minimum = BETA_NOTE_F1_BASELINE - MAX_BETA_NOTE_F1_REGRESSION
+    return {
+        "route": BETA_ROUTE,
+        "baseline_note_f1": BETA_NOTE_F1_BASELINE,
+        "maximum_allowed_regression": MAX_BETA_NOTE_F1_REGRESSION,
+        "minimum_note_f1": minimum,
+        "actual_note_f1": actual,
+        "passed": actual >= minimum,
+    }
 
 
 def run_pyin(
@@ -502,6 +549,8 @@ def write_report(
     output: Path,
     summary: list[dict[str, Any]],
     separation: dict[str, Any],
+    oracle_pitch_fingering: dict[str, Any],
+    beta_gate: dict[str, Any],
     track_count: int,
 ) -> None:
     ranked = sorted(summary, key=lambda row: row["note_f1"], reverse=True)
@@ -546,6 +595,15 @@ def write_report(
             f"Best controlled-mixture route: **{best['route']}** "
             f"(note F1 {best['note_f1']:.3f}, tab F1 {best['tab_f1']:.3f}).",
             "",
+            f"With ground-truth pitches, the shipped dynamic-programming fingering "
+            f"solver scores **{oracle_pitch_fingering['tab_f1']:.3f} tab F1**. "
+            "This separates fingering ambiguity from pitch-detection errors.",
+            "",
+            f"Beta note-F1 gate for `{beta_gate['route']}`: "
+            f"**{'pass' if beta_gate['passed'] else 'fail'}** at "
+            f"{beta_gate['actual_note_f1']:.3f}; minimum "
+            f"{beta_gate['minimum_note_f1']:.3f} from the 0.666 baseline.",
+            "",
             "Tab F1 uses SoloTrace's deterministic fingering for pYIN and Basic Pitch; "
             "TabCNN predicts string/fret directly. EGSet12 is isolated guitar, so separation "
             "scores use a deterministic full-band backing mixed at 0.9× lead RMS.",
@@ -581,9 +639,21 @@ def write_report(
     output.write_text("\n".join(lines) + "\n")
 
 
+def publish_machine_results(result: dict[str, Any]) -> Path:
+    output = ROOT / "docs" / "model-benchmark-results.json"
+    evidence = {key: value for key, value in result.items() if key != "per_track"}
+    output.write_text(json.dumps(evidence, indent=2) + "\n")
+    return output
+
+
 def main() -> None:
     args = parse_args()
     args.work_dir.mkdir(parents=True, exist_ok=True)
+    results_path = args.work_dir / "results.json"
+    if args.publish_existing:
+        output = publish_machine_results(json.loads(results_path.read_text()))
+        print(f"Wrote {output}")
+        return
     tracks = [
         path.stem
         for path in sorted(args.data_dir.glob("*.jams"))
@@ -674,6 +744,7 @@ def main() -> None:
         "reference_notes": oracle_reference,
         "position_matched": oracle_position_matches,
     }
+    beta_gate = beta_note_f1_gate(summary)
     preview_basic = per_track["preview-basic-pitch"]
     preview_pyin = per_track["preview-pyin"]
     per_track_delta = {
@@ -716,6 +787,7 @@ def main() -> None:
         "tracks": tracks,
         "onset_tolerance_s": ONSET_TOLERANCE_S,
         "fingerprint": {
+            "source_revision": source_revision(),
             "dataset_sha256": content_hash(
                 [args.data_dir / f"{track}.jams" for track in tracks]
             ),
@@ -728,23 +800,46 @@ def main() -> None:
                     ROOT / "scripts" / "benchmark" / "tabcnn_worker.py",
                 ]
             ),
+            "basic_pitch_model_sha256": tree_hash(
+                next(
+                    (ROOT / ".workers" / "transcribe").glob(
+                        "lib/python*/site-packages/basic_pitch/"
+                        "saved_models/icassp_2022/nmp.mlpackage"
+                    )
+                )
+            ),
+        },
+        "solver": {
+            "name": "production_dynamic_programming",
+            "tuning_midi": TUNING,
+            "fret_count": 22,
+            "mode": "balanced",
         },
         "oracle_pitch_fingering": oracle_pitch_fingering,
         "offline_quality_gate": quality_gate,
+        "beta_note_f1_gate": beta_gate,
         "summary": summary,
         "separation": separation,
         "per_track": per_track,
     }
-    results_path = args.work_dir / "results.json"
     results_path.write_text(json.dumps(result, indent=2) + "\n")
+    machine_results_path = publish_machine_results(result)
     write_report(
         ROOT / "docs" / "model-benchmark-results.md",
         summary,
         separation,
+        oracle_pitch_fingering,
+        beta_gate,
         len(tracks),
     )
     print(f"Wrote {results_path}")
+    print(f"Wrote {machine_results_path}")
     print(f"Wrote {ROOT / 'docs' / 'model-benchmark-results.md'}")
+    if not beta_gate["passed"]:
+        raise RuntimeError(
+            "Beta note-F1 gate failed: "
+            f"{beta_gate['actual_note_f1']:.3f} < {beta_gate['minimum_note_f1']:.3f}"
+        )
 
 
 if __name__ == "__main__":

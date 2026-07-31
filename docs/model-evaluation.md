@@ -43,13 +43,14 @@ can fail with `No Metal device available`; a normal local app launch works.
 
 ## Transcription: Basic Pitch CoreML
 
-Verified stack: Python 3.11, `basic-pitch==0.4.0`, `coremltools==9.0`, and
-`setuptools==80.9.0`.
+Verified stack: Python 3.11, `basic-pitch==0.4.0`, `coremltools==9.0`,
+`resampy==0.4.3`, and `setuptools==83.0.0`.
 
 ```bash
 uv venv --python 3.11 .workers/transcribe
 uv pip install --python .workers/transcribe/bin/python \
-  basic-pitch==0.4.0 coremltools==9.0 setuptools==80.9.0
+  basic-pitch==0.4.0 coremltools==9.0 setuptools==83.0.0
+uv pip install --python .workers/transcribe/bin/python --upgrade resampy==0.4.3
 ```
 
 A generated 440 Hz tone produced one A4 event and 83 pitch-bend frames through
@@ -57,9 +58,9 @@ the CoreML model. SoloTrace adds the marked-passage offset to each returned
 event and preserves the contour rather than using Basic Pitch's default 120 BPM
 MIDI timing.
 
-Keep this worker separate from Demucs. Demucs conversion currently resolves
-`setuptools==83`, while Basic Pitch's current resampling dependency still needs
-the `pkg_resources` module present in setuptools 80.
+Keep this worker separate from Demucs. Basic Pitch 0.4.0 declares a stale
+Resampy `<0.4.3` cap, so SoloTrace deliberately overrides it to 0.4.3. That
+release uses `importlib.resources` instead of the removed `pkg_resources` API.
 
 ## Public benchmark decision
 
@@ -67,16 +68,21 @@ All 12 EGSet12 public electric-guitar solos were evaluated against their exact
 per-string annotations. The controlled full-band mixture used a deterministic
 non-guitar backing at 0.9 times the lead RMS.
 
-- Enhanced Demucs + Basic Pitch: **0.666 note F1**
+- Enhanced Demucs + Basic Pitch: **0.669 note F1**
+- Enhanced Demucs + Basic Pitch: **0.344 tab F1**
+- Oracle-pitch production fingering: **0.646 tab F1**
 - Fast preview + pYIN: **0.215 note F1**
-- Demucs separation: **8.69 dB median SI-SDR**
+- Demucs separation: **8.72 dB median SI-SDR**
 - Preview separation: **4.40 dB median SI-SDR**
 
 This makes Demucs + Basic Pitch the default installed route. It was about
 3.1 times better on note F1 and 7.5 times faster per track in this benchmark.
-Tab F1 remained 0.218 because audio cannot fully determine string/fret choice;
-the correction editor remains essential. See
+The refreshed 0.344 tab F1 uses the shipped dynamic-programming fingering
+solver; its 0.646 oracle-pitch score shows that both pitch detection and
+string/fret ambiguity still require the correction editor. See
 [`model-benchmark-results.md`](model-benchmark-results.md) for all 12 routes and
+[`model-benchmark-results.json`](model-benchmark-results.json) for the
+machine-readable evidence, or
 [`public-benchmark-research.md`](public-benchmark-research.md) for source and
 licensing details.
 
