@@ -11,12 +11,13 @@ from xml.etree import ElementTree as ET
 
 import mido
 
+from .beat_map import TempoEvent, pickup_midi_shift, tempo_events_for_tab
 from .models import ChordEvent, NoteEvent, Project
 from .version import APP_VERSION
 
 PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 PROJECT_FORMAT = "solotrace-project"
-PROJECT_SCHEMA_VERSION = 2
+PROJECT_SCHEMA_VERSION = 3
 
 
 def pitch_name(midi_pitch: int) -> str:
@@ -98,6 +99,14 @@ class _MeasureNote:
     tie_start: bool
 
 
+@dataclass(frozen=True)
+class _MeasureLocation:
+    measure_number: int
+    start_tick: int
+    end_tick: int
+    implicit: bool
+
+
 def _measure_ticks(project: Project) -> int:
     beats, beat_type = project.tab.time_signature
     if beats <= 0 or beat_type <= 0:
@@ -114,7 +123,32 @@ def _measure_ticks(project: Project) -> int:
     return measure_ticks.numerator
 
 
-def _split_musicxml_notes(project: Project, ticks_per_measure: int) -> list[_MeasureNote]:
+def _bar_offset_ticks(project: Project) -> int:
+    return getattr(project.tab, "bar_offset_ticks", 0)
+
+
+def _measure_location_for_tick(
+    tick: int,
+    ticks_per_measure: int,
+    bar_offset_ticks: int,
+) -> _MeasureLocation:
+    if bar_offset_ticks > 0 and tick < bar_offset_ticks:
+        return _MeasureLocation(0, 0, bar_offset_ticks, True)
+    adjusted = max(0, tick - bar_offset_ticks)
+    index = adjusted // ticks_per_measure
+    return _MeasureLocation(
+        index + 1,
+        bar_offset_ticks + index * ticks_per_measure,
+        bar_offset_ticks + (index + 1) * ticks_per_measure,
+        False,
+    )
+
+
+def _split_musicxml_notes(
+    project: Project,
+    ticks_per_measure: int,
+    bar_offset_ticks: int,
+) -> list[_MeasureNote]:
     segments: list[_MeasureNote] = []
     previous_end = 0
     for event in sorted(project.tab.notes, key=lambda note: (note.score_tick, note.id)):
@@ -123,13 +157,16 @@ def _split_musicxml_notes(project: Project, ticks_per_measure: int) -> list[_Mea
         event_end = event.score_tick + event.duration_ticks
         segment_start = event.score_tick
         while segment_start < event_end:
-            measure_index = segment_start // ticks_per_measure
-            measure_end = (measure_index + 1) * ticks_per_measure
-            segment_end = min(event_end, measure_end)
+            location = _measure_location_for_tick(
+                segment_start,
+                ticks_per_measure,
+                bar_offset_ticks,
+            )
+            segment_end = min(event_end, location.end_tick)
             segments.append(
                 _MeasureNote(
                     event=event,
-                    measure_number=measure_index + 1,
+                    measure_number=location.measure_number,
                     start_tick=segment_start,
                     duration_ticks=segment_end - segment_start,
                     tie_stop=segment_start > event.score_tick,
@@ -220,6 +257,27 @@ def _append_musicxml_harmony(
         ET.SubElement(harmony, "offset").text = str(offset)
 
 
+def _append_musicxml_tempo(
+    measure: ET.Element,
+    bpm: float,
+    offset: int,
+    *,
+    hidden: bool,
+) -> None:
+    attributes = {"placement": "above"}
+    if hidden:
+        attributes["print-object"] = "no"
+    direction = ET.SubElement(measure, "direction", attributes)
+    direction_type = ET.SubElement(direction, "direction-type")
+    metronome = ET.SubElement(direction_type, "metronome")
+    ET.SubElement(metronome, "beat-unit").text = "quarter"
+    tempo = f"{bpm:g}"
+    ET.SubElement(metronome, "per-minute").text = tempo
+    if offset:
+        ET.SubElement(direction, "offset").text = str(offset)
+    ET.SubElement(direction, "sound", tempo=tempo)
+
+
 def musicxml(project: Project) -> bytes:
     score = ET.Element("score-partwise", version="4.0")
     work = ET.SubElement(score, "work")
@@ -230,22 +288,60 @@ def musicxml(project: Project) -> bytes:
     part = ET.SubElement(score, "part", id="P1")
     divisions = project.tab.ticks_per_quarter
     ticks_per_measure = _measure_ticks(project)
-    segments = _split_musicxml_notes(project, ticks_per_measure)
+    bar_offset_ticks = _bar_offset_ticks(project)
+    segments = _split_musicxml_notes(project, ticks_per_measure, bar_offset_ticks)
     grouped: dict[int, list[_MeasureNote]] = {}
     for segment in segments:
         grouped.setdefault(segment.measure_number, []).append(segment)
     harmonies: dict[int, list[ChordEvent]] = {}
     for chord in project.tab.chords.events:
-        measure_number = chord.score_tick // ticks_per_measure + 1
+        measure_number = _measure_location_for_tick(
+            chord.score_tick,
+            ticks_per_measure,
+            bar_offset_ticks,
+        ).measure_number
         harmonies.setdefault(measure_number, []).append(chord)
+
+    tempos: dict[int, list[TempoEvent]] = {}
+    final_event_tick = max(
+        [
+            *(note.score_tick + note.duration_ticks for note in project.tab.notes),
+            *(chord.score_tick + chord.duration_ticks for chord in project.tab.chords.events),
+            0,
+        ]
+    )
+    for tempo_event in tempo_events_for_tab(project.tab):
+        if tempo_event.score_tick > final_event_tick:
+            continue
+        measure_number = _measure_location_for_tick(
+            tempo_event.score_tick,
+            ticks_per_measure,
+            bar_offset_ticks,
+        ).measure_number
+        tempos.setdefault(measure_number, []).append(tempo_event)
 
     final_measure = max(
         max(grouped, default=1),
         max(harmonies, default=1),
+        max(tempos, default=1),
     )
-    for measure_number in range(1, final_measure + 1):
-        measure = ET.SubElement(part, "measure", number=str(measure_number))
-        if measure_number == 1:
+    first_measure = 0 if bar_offset_ticks else 1
+    for measure_number in range(first_measure, final_measure + 1):
+        measure_tick = (
+            0
+            if measure_number == 0
+            else bar_offset_ticks + (measure_number - 1) * ticks_per_measure
+        )
+        location = _measure_location_for_tick(
+            measure_tick,
+            ticks_per_measure,
+            bar_offset_ticks,
+        )
+        measure_attributes = {"number": str(measure_number)}
+        if location.implicit:
+            measure_attributes["implicit"] = "yes"
+        measure = ET.SubElement(part, "measure", measure_attributes)
+        if measure_number == first_measure:
             attributes = ET.SubElement(measure, "attributes")
             ET.SubElement(attributes, "divisions").text = str(divisions)
             time = ET.SubElement(attributes, "time")
@@ -265,14 +361,14 @@ def musicxml(project: Project) -> bytes:
                 if alter:
                     ET.SubElement(tuning, "tuning-alter").text = str(alter)
                 ET.SubElement(tuning, "tuning-octave").text = str(octave)
-            direction = ET.SubElement(measure, "direction", placement="above")
-            direction_type = ET.SubElement(direction, "direction-type")
-            metronome = ET.SubElement(direction_type, "metronome")
-            ET.SubElement(metronome, "beat-unit").text = "quarter"
-            tempo = f"{project.tab.tempo_bpm:g}"
-            ET.SubElement(metronome, "per-minute").text = tempo
-            ET.SubElement(direction, "sound", tempo=tempo)
-        measure_start = (measure_number - 1) * ticks_per_measure
+        measure_start = location.start_tick
+        for index, tempo_event in enumerate(tempos.get(measure_number, [])):
+            _append_musicxml_tempo(
+                measure,
+                tempo_event.bpm,
+                max(0, tempo_event.score_tick - measure_start),
+                hidden=measure_number != first_measure or index > 0,
+            )
         for chord in sorted(
             harmonies.get(measure_number, []),
             key=lambda event: (event.score_tick, event.id),
@@ -293,22 +389,43 @@ def midi(project: Project) -> bytes:
     midi_file = mido.MidiFile(type=1, ticks_per_beat=project.tab.ticks_per_quarter)
     track = mido.MidiTrack()
     midi_file.tracks.append(track)
-    tempo = mido.bpm2tempo(project.tab.tempo_bpm)
     midi_title = project.title.encode("latin-1", "replace").decode("latin-1")
     track.append(mido.MetaMessage("track_name", name=midi_title, time=0))
-    track.append(mido.MetaMessage("set_tempo", tempo=round(tempo), time=0))
-    events: list[tuple[int, int, mido.Message]] = []
+    beats, beat_type = project.tab.time_signature
+    track.append(
+        mido.MetaMessage(
+            "time_signature",
+            numerator=beats,
+            denominator=beat_type,
+            clocks_per_click=36 if beat_type == 8 and beats > 3 and beats % 3 == 0 else 24,
+            time=0,
+        )
+    )
+    events: list[tuple[int, int, mido.Message | mido.MetaMessage]] = []
+    pickup_shift = pickup_midi_shift(project.tab)
+    for index, tempo_event in enumerate(tempo_events_for_tab(project.tab)):
+        events.append(
+            (
+                0 if index == 0 else tempo_event.score_tick + pickup_shift,
+                -2,
+                mido.MetaMessage(
+                    "set_tempo",
+                    tempo=round(mido.bpm2tempo(tempo_event.bpm)),
+                    time=0,
+                ),
+            )
+        )
     for note in project.tab.notes:
         events.append(
             (
-                note.score_tick,
+                note.score_tick + pickup_shift,
                 1,
                 mido.Message("note_on", note=note.midi_pitch, velocity=82, time=0),
             )
         )
         events.append(
             (
-                note.score_tick + note.duration_ticks,
+                note.score_tick + note.duration_ticks + pickup_shift,
                 0,
                 mido.Message("note_off", note=note.midi_pitch, velocity=0, time=0),
             )
