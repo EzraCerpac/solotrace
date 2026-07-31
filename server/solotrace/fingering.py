@@ -27,6 +27,13 @@ class GroupState:
     parent_group_index: int
 
 
+@dataclass(frozen=True)
+class FingeringConstraints:
+    allowed_strings: frozenset[int] | None = None
+    min_fret: int | None = None
+    max_fret: int | None = None
+
+
 WEIGHTS: dict[FingeringMode, Weights] = {
     "balanced": Weights(1.0, 0.36, 0.018, 0.22, 0.03),
     "easiest": Weights(1.35, 0.22, 0.06, -0.2, 0.02),
@@ -274,20 +281,37 @@ def assign_fingerings(
     fret_count: int,
     mode: FingeringMode = "balanced",
     preferred_fret: int | None = None,
+    constraints: FingeringConstraints | None = None,
 ) -> list[NoteEvent]:
     if not notes:
         return []
     weights = WEIGHTS[mode]
     indexed_notes = _chronological_notes(notes)
     chronological_notes = [note for _, note in indexed_notes]
+    unrestricted_candidates = [
+        legal_fingerings(note.midi_pitch, tuning, fret_count)
+        for note in chronological_notes
+    ]
     candidates: list[list[Fingering]] = []
-    for note in chronological_notes:
-        choices = legal_fingerings(note.midi_pitch, tuning, fret_count)
+    for note, legal in zip(chronological_notes, unrestricted_candidates, strict=True):
+        choices = [
+            choice
+            for choice in legal
+            if constraints is None
+            or (
+                (
+                    constraints.allowed_strings is None
+                    or choice.string in constraints.allowed_strings
+                )
+                and (constraints.min_fret is None or choice.fret >= constraints.min_fret)
+                and (constraints.max_fret is None or choice.fret <= constraints.max_fret)
+            )
+        ]
         if note.user_locked:
             locked = next(
                 (
                     choice
-                    for choice in choices
+                    for choice in legal
                     if (choice.string, choice.fret) == (note.string, note.fret)
                 ),
                 None,
@@ -357,9 +381,14 @@ def assign_fingerings(
             for index in range(group_start, group_end)
             if index != note_index
         }
+        alternative_candidates = (
+            unrestricted_candidates[note_index]
+            if constraints is not None and not note.user_locked
+            else candidates[note_index]
+        )
         viable_candidates = [
             candidate
-            for candidate in candidates[note_index]
+            for candidate in alternative_candidates
             if candidate.string not in sibling_strings
             and (
                 incoming is None

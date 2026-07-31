@@ -8,6 +8,12 @@ interface Weights {
   positionCenter: number
 }
 
+export interface FingeringConstraints {
+  allowedStrings?: readonly number[]
+  minFret?: number | null
+  maxFret?: number | null
+}
+
 type Voicing = Fingering[]
 
 interface GroupState {
@@ -144,6 +150,22 @@ export function legalFingerings(
       return [{ string, fret, label: `String ${string}, fret ${fret}`, cost: 0 }]
     })
     .sort((left, right) => left.fret - right.fret || left.string - right.string)
+}
+
+function constrainedFingerings(
+  fingerings: readonly Fingering[],
+  constraints: FingeringConstraints | undefined,
+): Fingering[] {
+  if (!constraints) return [...fingerings]
+  const allowedStrings = constraints.allowedStrings
+    ? new Set(constraints.allowedStrings)
+    : undefined
+  return fingerings.filter(
+    ({ string, fret }) =>
+      (!allowedStrings || allowedStrings.has(string)) &&
+      (constraints.minFret == null || fret >= constraints.minFret) &&
+      (constraints.maxFret == null || fret <= constraints.maxFret),
+  )
 }
 
 function handPosition(fingering: Fingering): number {
@@ -314,15 +336,20 @@ export function assignFingerings(
   fretCount: number,
   mode: FingeringMode = 'balanced',
   preferredFret?: number | null,
+  constraints?: FingeringConstraints,
 ): NoteEvent[] {
   if (notes.length === 0) return []
   const weights = WEIGHTS[mode]
   const indexedNotes = chronologicalNotes(notes)
   const arrangedNotes = indexedNotes.map(({ note }) => note)
-  const candidates = arrangedNotes.map((note) => {
-    let choices = legalFingerings(note.midi_pitch, tuning, fretCount)
+  const unrestrictedCandidates = arrangedNotes.map((note) =>
+    legalFingerings(note.midi_pitch, tuning, fretCount),
+  )
+  const candidates = arrangedNotes.map((note, noteIndex) => {
+    const legal = unrestrictedCandidates[noteIndex]
+    let choices = constrainedFingerings(legal, constraints)
     if (note.user_locked) {
-      const locked = choices.find(
+      const locked = legal.find(
         (choice) => choice.string === note.string && choice.fret === note.fret,
       )
       if (!locked) {
@@ -394,7 +421,9 @@ export function assignFingerings(
         .filter((_, groupNoteIndex) => groupNoteIndex + groupStart !== noteIndex)
         .map(({ string }) => string),
     )
-    const alternatives = candidates[noteIndex]
+    const alternatives = (constraints && !note.user_locked
+      ? unrestrictedCandidates[noteIndex]
+      : candidates[noteIndex])
       .filter(
         (candidate) =>
           !siblingStrings.has(candidate.string) &&
