@@ -8,6 +8,10 @@
   permanent deletion.
 - One chronological keyboard-first review queue for uncertain notes and
   unreviewed chords, with unified undo and redo.
+- Whole-bar Phrase Workshop with constrained fingering previews and new
+  mixed-style versions that preserve locked corrections and source notes.
+- Version-local Beat Map editing for sync pins, tempo, meter, pickups, and
+  anchor-driven MIDI/MusicXML export.
 - Bounded polyphonic fingering keeps simultaneous notes on distinct strings,
   even for unsorted eight-string input.
 - Refreshed EGSet12 production-path evidence: 0.669 note F1, 0.344 tab F1, and

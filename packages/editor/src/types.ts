@@ -1,6 +1,7 @@
 export type AssetRole = 'original' | 'lead' | 'backing'
 export type ExportFormat = 'json' | 'musicxml' | 'midi' | 'ascii'
 export type FingeringMode = 'balanced' | 'easiest' | 'position'
+export type VersionFingeringStyle = FingeringMode | 'mixed'
 export type LockPolicy = 'preserve' | 'clear'
 export type ProjectOrigin = 'local' | 'example' | 'saved-example'
 export type ChordKind = 'chord' | 'no-chord' | 'unknown'
@@ -108,6 +109,8 @@ export interface TabDocument {
   capo_fret: number
   fret_count: number
   preferred_fret: number | null
+  /** Score ticks before the first complete bar. Zero means no pickup. */
+  bar_offset_ticks?: number
   sync_anchors: SyncAnchor[]
   notes: NoteEvent[]
   chords: ChordTrack
@@ -117,7 +120,7 @@ export interface TabVersion {
   id: string
   name: string
   source: string
-  fingering_mode: FingeringMode
+  fingering_mode: VersionFingeringStyle
   created_at: string
   updated_at: string
   tab: TabDocument
@@ -225,6 +228,22 @@ export interface RefingerProjectRequest {
   mode: FingeringMode
   name?: string
   lockPolicy?: LockPolicy
+  range?: {
+    startScoreTick: number
+    endScoreTick: number
+  }
+  constraints?: {
+    allowedStrings?: readonly number[]
+    minFret?: number | null
+    maxFret?: number | null
+  }
+}
+
+export interface BeatMapUpdate {
+  tempo_bpm: number
+  time_signature: [number, number]
+  bar_offset_ticks: number
+  sync_anchors: SyncAnchor[]
 }
 
 export type VersionAction =
@@ -233,6 +252,7 @@ export type VersionAction =
   | { type: 'delete'; versionId: string }
   | { type: 'replace-notes'; versionId: string; notes: NoteEvent[] }
   | { type: 'replace-chords'; versionId: string; track: ChordTrack }
+  | { type: 'replace-beat-map'; versionId: string; beatMap: BeatMapUpdate }
 
 export interface VersionActionRequest {
   projectId: string

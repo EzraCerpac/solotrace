@@ -110,6 +110,115 @@ test("anonymous edits survive reload and Reset restores the immutable example", 
   assert.equal(storage.getItem(DRAFT_KEY), null);
 });
 
+test("phrase refingering forwards the range and constraints into a mixed version", async () => {
+  const storage = new MemoryStorage();
+  const client = new HostedEditorClient({
+    fetch: exampleFetch(),
+    now: () => NOW,
+    storage,
+  });
+  const base = await client.loadProject({ origin: "example", slug: SLUG });
+  const source = base.versions.find(
+    (version: { id: string }) => version.id === base.active_version_id,
+  )!;
+  const firstNote = source.tab.notes[0];
+  const ticksPerBar =
+    source.tab.ticks_per_quarter *
+    source.tab.time_signature[0] *
+    (4 / source.tab.time_signature[1]);
+  const barOffset = source.tab.bar_offset_ticks ?? 0;
+  const selectedBarStart = Math.max(
+    0,
+    Math.floor((firstNote.score_tick - barOffset) / ticksPerBar) * ticksPerBar +
+      barOffset,
+  );
+  const selectedBarEnd = selectedBarStart + ticksPerBar;
+
+  const edited = await client.refingerProject({
+    constraints: {
+      allowedStrings: source.tab.tuning.map((_: number, index: number) => index + 1),
+      maxFret: source.tab.fret_count,
+      minFret: 0,
+    },
+    expectedRevision: base.revision,
+    mode: "easiest",
+    name: "Opening bar · Easiest",
+    projectId: base.id,
+    range: {
+      startScoreTick: firstNote.score_tick,
+      endScoreTick: firstNote.score_tick + 1,
+    },
+    sourceVersionId: source.id,
+  });
+
+  const phraseVersion = edited.versions.find(
+    (version) => version.id === edited.active_version_id,
+  )!;
+  assert.equal(phraseVersion.fingering_mode, "mixed");
+  assert.equal(phraseVersion.name, "Opening bar · Easiest");
+  assert.equal(edited.versions.length, base.versions.length + 1);
+  assert.deepEqual(
+    base.versions.find((version) => version.id === source.id),
+    source,
+    "the source version remains immutable",
+  );
+  for (const [index, note] of phraseVersion.tab.notes.entries()) {
+    if (note.score_tick < selectedBarStart || note.score_tick >= selectedBarEnd) {
+      assert.deepEqual(note, source.tab.notes[index]);
+    }
+  }
+  assert.equal(JSON.parse(storage.getItem(DRAFT_KEY)!).active_version_id, phraseVersion.id);
+});
+
+test("replace-beat-map persists timing on the target hosted version only", async () => {
+  const storage = new MemoryStorage();
+  const client = new HostedEditorClient({
+    fetch: exampleFetch(),
+    now: () => NOW,
+    storage,
+  });
+  const base = await client.loadProject({ origin: "example", slug: SLUG });
+  const twoVersions = await client.refingerProject({
+    expectedRevision: base.revision,
+    mode: "balanced",
+    projectId: base.id,
+    sourceVersionId: base.active_version_id,
+  });
+  const target = twoVersions.versions.find(
+    (version) => version.id === twoVersions.active_version_id,
+  )!;
+  const untouched = twoVersions.versions.find((version) => version.id !== target.id)!;
+
+  const edited = await client.applyVersionAction({
+    action: {
+      type: "replace-beat-map",
+      versionId: target.id,
+      beatMap: {
+        bar_offset_ticks: 240,
+        sync_anchors: target.tab.sync_anchors.map((anchor) => ({ ...anchor })),
+        tempo_bpm: target.tab.tempo_bpm,
+        time_signature: [...target.tab.time_signature],
+      },
+    },
+    expectedRevision: twoVersions.revision,
+    projectId: twoVersions.id,
+  });
+
+  const updatedTarget = edited.versions.find((version) => version.id === target.id)!;
+  assert.equal(updatedTarget.tab.bar_offset_ticks, 240);
+  assert.equal(updatedTarget.updated_at, NOW);
+  assert.deepEqual(
+    edited.versions.find((version) => version.id === untouched.id),
+    untouched,
+  );
+  const savedDraft = JSON.parse(storage.getItem(DRAFT_KEY)!);
+  assert.equal(
+    savedDraft.versions.find((version: { id: string }) => version.id === target.id).tab
+      .bar_offset_ticks,
+    240,
+  );
+});
+
 test("legacy anonymous drafts inherit deterministic example chords", async () => {
   const storage = new MemoryStorage();
   const legacyDraft = cloneBase();

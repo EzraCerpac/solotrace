@@ -1,7 +1,9 @@
 import type {
+  BeatMap,
   Capabilities,
   ChordTrack,
   DraftEngine,
+  FingeringConstraints,
   FingeringMode,
   NoteEvent,
   Passage,
@@ -234,6 +236,8 @@ export const api = {
     mode: FingeringMode | null,
     name?: string,
     lockPolicy: 'preserve' | 'clear' = 'preserve',
+    range?: { startScoreTick: number; endScoreTick: number },
+    constraints?: FingeringConstraints,
   ) =>
     request<Project>(`/api/projects/${encodeURIComponent(projectId)}/versions`, {
       method: 'POST',
@@ -243,9 +247,44 @@ export const api = {
         source_version_id: sourceVersionId,
         mode,
         lock_policy: lockPolicy,
+        ...(range
+          ? {
+              range: {
+                start_score_tick: range.startScoreTick,
+                end_score_tick: range.endScoreTick,
+              },
+            }
+          : {}),
+        ...(constraints
+          ? {
+              constraints: {
+                allowed_strings: constraints.allowedStrings ?? null,
+                min_fret: constraints.minFret ?? null,
+                max_fret: constraints.maxFret ?? null,
+              },
+            }
+          : {}),
         ...(name ? { name } : {}),
       }),
     }),
+
+  patchBeatMap: (
+    projectId: string,
+    versionId: string,
+    expectedRevision: number,
+    beatMap: BeatMap,
+  ) =>
+    request<Project>(
+      `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/beat-map`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          beat_map: beatMap,
+        }),
+      },
+    ),
 
   activateVersion: (projectId: string, versionId: string, expectedRevision: number) =>
     request<Project>(

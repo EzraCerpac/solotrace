@@ -193,7 +193,7 @@ export function planPhraseFingering(
     const changed = before.string !== planned.string || before.fret !== planned.fret
     notes[originalIndex] = changed
       ? { ...planned, reviewed: false, user_locked: false }
-      : { ...planned, reviewed: before.reviewed, user_locked: before.user_locked }
+      : { ...before }
   })
   const changes = tab.notes.flatMap((before, index): PhraseFingeringChange[] => {
     const after = notes[index]

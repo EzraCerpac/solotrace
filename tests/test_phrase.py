@@ -85,6 +85,7 @@ def test_phrase_constraints_keep_locked_notes_and_return_structured_errors() -> 
         ),
     )
     assert (plan.notes[0].string, plan.notes[0].fret) == (1, 5)
+    assert plan.notes[0] == locked
     assert plan.locked_note_count == 1
     assert plan.changes == []
 

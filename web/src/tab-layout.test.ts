@@ -128,4 +128,19 @@ describe('Play tab layout', () => {
         : null,
     ).toBe(121)
   })
+
+  it('shifts passage-local pickup phase into song-wide measure boundaries', () => {
+    const project = makeProject()
+    project.tab.sync_anchors = [
+      { audio_frame: 239 * 48_000, score_tick: 0 },
+      { audio_frame: 250 * 48_000, score_tick: 10_560 },
+    ]
+    project.tab.bar_offset_ticks = 480
+
+    const measure = buildPlayMeasures(project).find((candidate) =>
+      candidate.notes.some((note) => note.id === 'late-note'),
+    )
+
+    expect(measure).toMatchObject({ start_s: 239.5, end_s: 241.5 })
+  })
 })

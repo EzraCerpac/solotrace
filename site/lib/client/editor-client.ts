@@ -214,6 +214,8 @@ export class HostedEditorClient implements EditorClientAdapter {
       name: request.name?.trim() || humanMode(request.mode),
       createdAt: this.#now(),
       lockPolicy: request.lockPolicy,
+      range: request.range,
+      constraints: request.constraints,
     });
     return this.#persistMutation(updated, request.expectedRevision);
   }

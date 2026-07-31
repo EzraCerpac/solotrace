@@ -5,8 +5,9 @@ import {
   pitchName,
   scoreTickToAudioFrame,
 } from '../music'
-import type { ChordEvent, Fingering, Project } from '../types'
+import type { ChordEvent, Fingering, NoteEvent, Project } from '../types'
 import { HarmonyLane } from './HarmonyLane'
+import type { PhraseBar } from './PhraseWorkshop'
 import { TablatureStaff } from './TablatureStaff'
 
 interface TabEditorProps {
@@ -21,6 +22,11 @@ interface TabEditorProps {
   onChordBoundaryMove?: (leftChordId: string, seconds: number) => void
   onAddChord?: () => void
   disabled?: boolean
+  readOnly?: boolean
+  phraseBars?: readonly PhraseBar[]
+  phraseRange?: { startBar: number; endBar: number; startScoreTick: number; endScoreTick: number } | null
+  phrasePreviewNotes?: readonly NoteEvent[]
+  onPhraseBarSelect?: (bar: number, extend: boolean) => void
 }
 
 const side = 64
@@ -37,6 +43,11 @@ export function TabEditor({
   onChordBoundaryMove = () => undefined,
   onAddChord = () => undefined,
   disabled = false,
+  readOnly = false,
+  phraseBars = [],
+  phraseRange = null,
+  phrasePreviewNotes = [],
+  onPhraseBarSelect = () => undefined,
 }: TabEditorProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const passageStart = project.passage.start_s
@@ -65,14 +76,16 @@ export function TabEditor({
         Math.round(passageEnd * project.tab.sample_rate),
         project.tab.sync_anchors,
       )
-      const firstTick = Math.ceil(startTick / ticksPerMeasure) * ticksPerMeasure
+      const barOffset = project.tab.bar_offset_ticks ?? 0
+      const firstTick =
+        barOffset + Math.ceil((startTick - barOffset) / ticksPerMeasure) * ticksPerMeasure
       for (let tick = firstTick; tick <= endTick; tick += ticksPerMeasure) {
         const time =
           scoreTickToAudioFrame(tick, project.tab.sync_anchors) /
           project.tab.sample_rate
         if (time >= passageStart && time <= passageEnd) {
           output.push({
-            number: Math.floor(tick / ticksPerMeasure) + 1,
+            number: Math.floor((tick - barOffset) / ticksPerMeasure) + 1,
             time,
           })
         }
@@ -97,6 +110,7 @@ export function TabEditor({
     passageEnd,
     passageStart,
     project.tab.sample_rate,
+    project.tab.bar_offset_ticks,
     project.tab.sync_anchors,
     project.tab.tempo_bpm,
     project.tab.ticks_per_quarter,
@@ -158,6 +172,44 @@ export function TabEditor({
         }}
       >
         <div className="tab-timeline" style={{ width }}>
+          {phraseRange && phraseBars.length > 0 && (
+            <div
+              className="phrase-selection-lane"
+              role="group"
+              aria-label="Select phrase bars"
+            >
+              {phraseBars.map((bar, index) => {
+                const startTime = scoreTickToAudioFrame(
+                  bar.startScoreTick,
+                  project.tab.sync_anchors,
+                ) / project.tab.sample_rate
+                const endTime = scoreTickToAudioFrame(
+                  bar.endScoreTick,
+                  project.tab.sync_anchors,
+                ) / project.tab.sample_rate
+                const left = xForTime(startTime)
+                const right = index === phraseBars.length - 1
+                  ? xForTime(endTime)
+                  : xForTime(Math.min(endTime, passageEnd))
+                const selected =
+                  bar.number >= phraseRange.startBar &&
+                  bar.number <= phraseRange.endBar
+                return (
+                  <button
+                    key={bar.number}
+                    type="button"
+                    className={selected ? 'selected' : ''}
+                    style={{ left, width: Math.max(44, right - left) }}
+                    aria-pressed={selected}
+                    aria-label={`Bar ${bar.number}, ${bar.noteCount} ${bar.noteCount === 1 ? 'note' : 'notes'}`}
+                    onClick={(event) => onPhraseBarSelect(bar.number, event.shiftKey)}
+                  >
+                    Bar {bar.number}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <HarmonyLane
             width={width}
             side={side}
@@ -168,7 +220,7 @@ export function TabEditor({
             chords={project.tab.chords.events}
             currentTime={currentTime}
             selectedChordId={selectedChordId}
-            editable
+            editable={!readOnly && !phraseRange}
             disabled={disabled}
             onSelect={onSelectChord}
             onBoundaryMove={onChordBoundaryMove}
@@ -189,8 +241,10 @@ export function TabEditor({
             currentTime={currentTime}
             playheadX={playheadX}
             selectedNoteId={selectedNoteId}
-            editable
+            editable={!readOnly && !phraseRange}
             disabled={disabled}
+            phraseRange={phraseRange}
+            phrasePreviewNotes={phrasePreviewNotes}
             ariaLabel={`${stringCount}-string tablature for ${project.title}`}
             description="Select a note, use arrow keys to move it to another legal string, or drag it vertically while its pitch stays fixed."
             onNoteActivate={(note) => {
@@ -202,7 +256,11 @@ export function TabEditor({
         </div>
       </div>
       <p className="tab-help">
-        Drag notes across strings. Drag chord edges to beats; hold Option for exact time.
+        {phraseRange
+          ? 'Choose whole bars above the harmony lane. Proposed fingerings are solid; current fingerings are ghosted.'
+          : readOnly
+            ? 'Read-only preview. Timing changes move the bar grid, not the recorded notes.'
+            : 'Drag notes across strings. Drag chord edges to beats; hold Option for exact time.'}
       </p>
     </section>
   )

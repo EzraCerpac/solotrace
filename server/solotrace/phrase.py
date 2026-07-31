@@ -177,11 +177,10 @@ def plan_phrase_fingering(
         before = tab.notes[original_index]
         planned = planned_working[working_index]
         changed = (before.string, before.fret) != (planned.string, planned.fret)
-        notes[original_index] = planned.model_copy(
-            update={
-                "reviewed": False if changed else before.reviewed,
-                "user_locked": False if changed else before.user_locked,
-            }
+        notes[original_index] = (
+            planned.model_copy(update={"reviewed": False, "user_locked": False})
+            if changed
+            else before.model_copy(deep=True)
         )
 
     changes = [

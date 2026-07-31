@@ -27,6 +27,10 @@ see [`PRIVATE_BETA_TERMS.md`](PRIVATE_BETA_TERMS.md).
 - Accept, edit, reopen, delete, and undo low-confidence notes.
 - Keep named tab versions; switching style creates a new balanced, easiest, or
   position-focused version without replacing the source.
+- Rework whole-bar phrases with string and fret constraints, preview every moved
+  fingering in context, then save the result as a separate mixed-style version.
+- Correct tempo, meter, pickups, and sync pins in a staged Beat Map without
+  changing the source audio or any other tab version.
 - Rename, trash, restore, and reopen song projects.
 - Loop a passage and slow playback while preserving pitch.
 - Export the active tab as JSON, MusicXML 4.0, MIDI, or ASCII; export one bundle
@@ -82,7 +86,8 @@ flowchart LR
 One Python process owns orchestration and persistence. One React app owns the
 editor. There is no Redis, cloud database, or application login. Integer audio
 frames are the synchronization truth; score ticks are retained separately for
-notation.
+notation. A version's Beat Map connects those clocks, so timing corrections are
+atomic, version-local, and exported faithfully.
 
 ## Run it
 

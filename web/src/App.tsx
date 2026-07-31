@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  applyBeatMap as applyBeatMapToTab,
+  beatMapFromTab,
   deleteChordToUnknown,
   emptyChordTrack,
   mergeChord,
   moveChordBoundary,
   normalizeChordTrack,
+  planPhraseFingering,
   replaceChordSymbol,
   setChordReviewed,
   splitChord,
@@ -16,6 +19,12 @@ import { Icon } from './components/Icon'
 import { MVSepDialog } from './components/MVSepDialog'
 import { ChordInspector } from './components/ChordInspector'
 import { NoteInspector } from './components/NoteInspector'
+import { BeatMapEditor, type BeatMapEditorValue } from './components/BeatMapEditor'
+import {
+  PhraseWorkshop,
+  type PhraseBar,
+  type PhrasePreview,
+} from './components/PhraseWorkshop'
 import { PipelineStrip } from './components/PipelineStrip'
 import { ProjectDialog } from './components/ProjectDialog'
 import { PlayTab } from './components/PlayTab'
@@ -24,8 +33,12 @@ import { Transport } from './components/Transport'
 import { UploadDialog } from './components/UploadDialog'
 import { VersionDialog } from './components/VersionDialog'
 import { Waveform } from './components/Waveform'
-import { formatTime, pitchName } from './music'
-import { audioFrameToScoreTick } from './music'
+import {
+  audioFrameToScoreTick,
+  formatTime,
+  pitchName,
+  scoreTickToAudioFrame,
+} from './music'
 import { reviewItemsForProject, type ReviewItem } from './review'
 import { legalFingerings, soundingTuning, availableFretCount } from '@solotrace/editor'
 import type {
@@ -37,12 +50,54 @@ import type {
   DraftScope,
   Fingering,
   FingeringMode,
+  FingeringConstraints,
   NoteEvent,
   Passage,
   Project,
   ProjectSummary,
   TabVersionSummary,
+  TabDocument,
 } from './types'
+
+type EditorTool = 'none' | 'review' | 'phrase' | 'beat-map'
+
+interface PhraseSession {
+  startBar: number
+  endBar: number
+  mode: FingeringMode
+  allowedStrings: number[]
+  minFret: number | null
+  maxFret: number | null
+  name: string
+  nameTouched: boolean
+  previousLoop: boolean
+}
+
+function ticksPerBar(tab: TabDocument): number {
+  return Math.round(
+    tab.ticks_per_quarter * tab.time_signature[0] * (4 / tab.time_signature[1]),
+  )
+}
+
+function barForScoreTick(tab: TabDocument, scoreTick: number): number {
+  const offset = tab.bar_offset_ticks ?? 0
+  if (offset > 0 && scoreTick < offset) return 0
+  return Math.floor((scoreTick - offset) / ticksPerBar(tab)) + 1
+}
+
+function scoreRangeForBars(tab: TabDocument, startBar: number, endBar: number) {
+  const offset = tab.bar_offset_ticks ?? 0
+  const size = ticksPerBar(tab)
+  const startScoreTick = startBar === 0 ? 0 : offset + (startBar - 1) * size
+  const endScoreTick = endBar === 0 ? offset : offset + endBar * size
+  return { startScoreTick, endScoreTick }
+}
+
+function phraseName(startBar: number, endBar: number, mode: FingeringMode): string {
+  const modeName =
+    mode === 'position' ? 'One position' : mode === 'easiest' ? 'Easiest' : 'Balanced'
+  return `Bars ${startBar}–${endBar} · ${modeName}`
+}
 
 const LAST_PROJECT_KEY = 'solotrace.lastProject'
 
@@ -135,6 +190,14 @@ function App() {
   const reviewUndoRef = useRef<ReviewHistoryEntry[]>([])
   const reviewRedoRef = useRef<ReviewHistoryEntry[]>([])
   const reviewReturnRef = useRef<ReviewReturnState | null>(null)
+  const phraseLaunchRef = useRef<HTMLButtonElement>(null)
+  const timingLaunchRef = useRef<HTMLButtonElement>(null)
+  const editorRef = useRef<HTMLElement>(null)
+  const phraseScrollRef = useRef(0)
+  const beatClickContextRef = useRef<AudioContext | null>(null)
+  const lastBeatClickRef = useRef<number | null>(null)
+  const phraseBarAnchorRef = useRef<number | null>(null)
+  const keepToolForVersionChangeRef = useRef(false)
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [trashedProjects, setTrashedProjects] = useState<ProjectSummary[]>([])
@@ -164,13 +227,23 @@ function App() {
   const [error, setError] = useState('')
   const [viewMode, setViewMode] = useState<'edit' | 'play'>('edit')
   const [fullscreen, setFullscreen] = useState(false)
-  const [reviewMode, setReviewMode] = useState(false)
+  const [editorTool, setEditorTool] = useState<EditorTool>('none')
+  const [phraseSession, setPhraseSession] = useState<PhraseSession | null>(null)
+  const [phraseReviewIds, setPhraseReviewIds] = useState<string[]>([])
+  const [beatMapDraft, setBeatMapDraft] = useState<BeatMapEditorValue | null>(null)
+  const [beatMapBaseline, setBeatMapBaseline] = useState('')
+  const [beatMapError, setBeatMapError] = useState<string | null>(null)
+  const [beatClickEnabled, setBeatClickEnabled] = useState(false)
   const [instrumentProfile, setInstrumentProfile] = useState<InstrumentProfile>({
     tuning: [40, 45, 50, 55, 59, 64],
     capoFret: 0,
     fretCount: 22,
     preferredFret: null,
   })
+  const reviewMode = editorTool === 'review'
+  const beatMapDirty = Boolean(
+    beatMapDraft && JSON.stringify(beatMapDraft) !== beatMapBaseline,
+  )
 
   const loadInitial = useCallback(async () => {
     setLoading(true)
@@ -219,9 +292,16 @@ function App() {
   }, [loadInitial])
 
   useEffect(() => {
+    if (keepToolForVersionChangeRef.current) {
+      keepToolForVersionChangeRef.current = false
+      return
+    }
     setSelectedNoteId(null)
     setSelectedChordId(null)
-    setReviewMode(false)
+    setEditorTool('none')
+    setPhraseSession(null)
+    setPhraseReviewIds([])
+    setBeatMapDraft(null)
     reviewReturnRef.current = null
   }, [project?.active_version_id, project?.id])
 
@@ -232,6 +312,17 @@ function App() {
     query.addEventListener('change', update)
     return () => query.removeEventListener('change', update)
   }, [])
+
+  useEffect(() => {
+    if (!mobileLayout || editorTool !== 'phrase') return
+    const frame = window.requestAnimationFrame(() => {
+      const editor = editorRef.current
+      const staff = editor?.querySelector<SVGElement>('.tab-svg')
+      if (!editor || !staff) return
+      editor.scrollTop += staff.getBoundingClientRect().top - editor.getBoundingClientRect().top
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [editorTool, mobileLayout])
 
   useEffect(() => {
     const update = () => setFullscreen(Boolean(document.fullscreenElement))
@@ -348,7 +439,8 @@ function App() {
   useEffect(() => {
     if (!playing) return
     let animationFrame = 0
-    const update = () => {
+    let lastBeatMapRender = 0
+    const update = (timestamp: number) => {
       const audio = audioRef.current
       if (!audio) return
       const reviewSelection =
@@ -357,6 +449,12 @@ function App() {
       const loopStart =
         reviewMode && reviewSelection
           ? Math.max(0, reviewSelection.audio_onset_s - 0.75)
+          : editorTool === 'phrase' && phraseSession && project
+            ? scoreTickToAudioFrame(
+                scoreRangeForBars(project.tab, phraseSession.startBar, phraseSession.endBar)
+                  .startScoreTick,
+                project.tab.sync_anchors,
+              ) / project.tab.sample_rate
           : passage?.start_s
       const loopEnd =
         reviewMode && reviewSelection
@@ -364,6 +462,12 @@ function App() {
               project?.duration_s ?? reviewSelection.audio_offset_s,
               reviewSelection.audio_offset_s + 0.75,
             )
+          : editorTool === 'phrase' && phraseSession && project
+            ? scoreTickToAudioFrame(
+                scoreRangeForBars(project.tab, phraseSession.startBar, phraseSession.endBar)
+                  .endScoreTick,
+                project.tab.sync_anchors,
+              ) / project.tab.sample_rate
           : passage?.end_s
       if (
         loop &&
@@ -373,7 +477,10 @@ function App() {
       ) {
         audio.currentTime = loopStart
       }
-      setCurrentTime(audio.currentTime)
+      if (editorTool !== 'beat-map' || timestamp - lastBeatMapRender >= 66) {
+        lastBeatMapRender = timestamp
+        setCurrentTime(audio.currentTime)
+      }
       animationFrame = requestAnimationFrame(update)
     }
     animationFrame = requestAnimationFrame(update)
@@ -383,6 +490,8 @@ function App() {
     passage,
     playing,
     project,
+    editorTool,
+    phraseSession,
     reviewMode,
     selectedChordId,
     selectedNoteId,
@@ -408,6 +517,58 @@ function App() {
     setAudioElement(node)
   }, [])
 
+  useEffect(() => {
+    if (
+      !beatClickEnabled ||
+      editorTool !== 'beat-map' ||
+      !beatMapDraft ||
+      !project ||
+      !playing
+    ) {
+      lastBeatClickRef.current = null
+      return
+    }
+    const [beats, beatUnit] = beatMapDraft.time_signature
+    const compound = beats === 6 && beatUnit === 8
+    const pulseTicks = compound
+      ? project.tab.ticks_per_quarter * 1.5
+      : (project.tab.ticks_per_quarter * 4) / beatUnit
+    if (!Number.isFinite(pulseTicks) || pulseTicks <= 0) return
+    const scoreTick = audioFrameToScoreTick(
+      Math.round(currentTime * project.tab.sample_rate),
+      beatMapDraft.sync_anchors,
+    )
+    const pulseIndex = Math.floor(
+      (scoreTick - beatMapDraft.bar_offset_ticks) / pulseTicks + 0.0001,
+    )
+    if (lastBeatClickRef.current === pulseIndex) return
+    lastBeatClickRef.current = pulseIndex
+    if (typeof AudioContext === 'undefined') return
+    const pulsesPerBar = compound ? 2 : beats
+    const downbeat = ((pulseIndex % pulsesPerBar) + pulsesPerBar) % pulsesPerBar === 0
+    const context = beatClickContextRef.current ?? new AudioContext()
+    beatClickContextRef.current = context
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.frequency.value = downbeat ? 1_480 : 980
+    gain.gain.setValueAtTime(0.0001, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(
+      downbeat ? 0.14 : 0.08,
+      context.currentTime + 0.004,
+    )
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.055)
+    oscillator.connect(gain).connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.06)
+  }, [beatClickEnabled, beatMapDraft, currentTime, editorTool, playing, project])
+
+  useEffect(
+    () => () => {
+      void beatClickContextRef.current?.close()
+    },
+    [],
+  )
+
   const updatePassage = useCallback((next: Passage) => {
     setPassage(next)
   }, [])
@@ -419,21 +580,27 @@ function App() {
   const selectedChordIndex =
     project?.tab.chords.events.findIndex((chord) => chord.id === selectedChordId) ?? -1
   const reviewSelection = selectedChord ?? selectedNote
-  const playbackLoopStart =
-    reviewMode && reviewSelection
-      ? Math.max(0, reviewSelection.audio_onset_s - 0.75)
-      : passage?.start_s ?? 0
-  const playbackLoopEnd =
-    reviewMode && reviewSelection
-      ? Math.min(
-          project?.duration_s ?? reviewSelection.audio_offset_s,
-          reviewSelection.audio_offset_s + 0.75,
-        )
-      : passage?.end_s ?? project?.duration_s ?? 0
   const reviewItems = useMemo(
-    () => (project ? reviewItemsForProject(project) : []),
-    [project],
+    () => {
+      if (!project) return []
+      const normal = reviewItemsForProject(project)
+      const included = new Set(normal.map((item) => item.id))
+      const phrase = project.tab.notes
+        .filter((note) => phraseReviewIds.includes(note.id) && !note.reviewed && !included.has(note.id))
+        .map((note) => ({ id: note.id, kind: 'note' as const, time: note.audio_onset_s }))
+      return [...normal, ...phrase].sort((left, right) => left.time - right.time)
+    },
+    [phraseReviewIds, project],
   )
+
+  const beatMapPreviewProject = useMemo(() => {
+    if (!project || !beatMapDraft) return project
+    try {
+      return { ...project, tab: applyBeatMapToTab(project.tab, beatMapDraft) }
+    } catch {
+      return project
+    }
+  }, [beatMapDraft, project])
   const selectedReviewIndex = reviewItems.findIndex(
     (item) => item.id === (selectedChordId ?? selectedNoteId),
   )
@@ -448,6 +615,111 @@ function App() {
   const activeVersion = project?.versions.find(
     (version) => version.id === project.active_version_id,
   )
+  const phraseBars = useMemo<PhraseBar[]>(() => {
+    if (!project) return []
+    const tab = project.tab
+    const offset = tab.bar_offset_ticks ?? 0
+    const size = ticksPerBar(tab)
+    const finalTick = Math.max(
+      offset + size,
+      tab.sync_anchors.at(-1)?.score_tick ?? 0,
+      ...tab.notes.map((note) => note.score_tick + note.duration_ticks),
+    )
+    const firstBar = offset > 0 ? 0 : 1
+    const finalBar = Math.max(1, barForScoreTick(tab, Math.max(0, finalTick - 1)))
+    return Array.from(
+      { length: finalBar - firstBar + 1 },
+      (_, index): PhraseBar => {
+        const number = firstBar + index
+        const range = scoreRangeForBars(tab, number, number)
+        return {
+          number,
+          ...range,
+          noteCount: tab.notes.filter(
+            (note) =>
+              note.score_tick >= range.startScoreTick &&
+              note.score_tick < range.endScoreTick,
+          ).length,
+        }
+      },
+    )
+  }, [project])
+  const phraseRange = useMemo(() => {
+    if (!project || !phraseSession) return null
+    return {
+      startBar: phraseSession.startBar,
+      endBar: phraseSession.endBar,
+      ...scoreRangeForBars(project.tab, phraseSession.startBar, phraseSession.endBar),
+    }
+  }, [phraseSession, project])
+  const phrasePlanResult = useMemo(() => {
+    if (!project || !phraseSession || !phraseRange) return { plan: null, error: null }
+    try {
+      return {
+        plan: planPhraseFingering(project.tab, {
+          range: phraseRange,
+          mode: phraseSession.mode,
+          constraints: {
+            allowedStrings: phraseSession.allowedStrings,
+            minFret: phraseSession.minFret,
+            maxFret: phraseSession.maxFret,
+          },
+        }),
+        error: null,
+      }
+    } catch (previewError) {
+      return {
+        plan: null,
+        error:
+          previewError instanceof Error
+            ? previewError.message
+            : 'Could not preview this phrase.',
+      }
+    }
+  }, [phraseRange, phraseSession, project])
+  const phrasePreview: PhrasePreview | null = useMemo(() => {
+    if (phrasePlanResult.error) {
+      return {
+        selectedNoteCount: 0,
+        lockedNoteCount: 0,
+        changes: [],
+        error: phrasePlanResult.error,
+      }
+    }
+    const plan = phrasePlanResult.plan
+    if (!plan) return null
+    return {
+      selectedNoteCount: plan.selectedNoteCount,
+      lockedNoteCount: plan.lockedNoteCount,
+      changes: plan.changes.map((change) => ({
+        noteId: change.noteId,
+        pitchLabel: pitchName(change.midiPitch),
+        before: change.before,
+        after: change.after,
+      })),
+    }
+  }, [phrasePlanResult])
+  const playbackLoopStart =
+    reviewMode && reviewSelection
+      ? Math.max(0, reviewSelection.audio_onset_s - 0.75)
+      : editorTool === 'phrase' && phraseRange && project
+        ? scoreTickToAudioFrame(
+            phraseRange.startScoreTick,
+            project.tab.sync_anchors,
+          ) / project.tab.sample_rate
+        : passage?.start_s ?? 0
+  const playbackLoopEnd =
+    reviewMode && reviewSelection
+      ? Math.min(
+          project?.duration_s ?? reviewSelection.audio_offset_s,
+          reviewSelection.audio_offset_s + 0.75,
+        )
+      : editorTool === 'phrase' && phraseRange && project
+        ? scoreTickToAudioFrame(
+            phraseRange.endScoreTick,
+            project.tab.sync_anchors,
+          ) / project.tab.sample_rate
+        : passage?.end_s ?? project?.duration_s ?? 0
 
   const adoptProject = (next: Project, includePassage = true) => {
     setProject(next)
@@ -619,7 +891,7 @@ function App() {
   const startReview = () => {
     if (!reviewItems.length) return
     reviewReturnRef.current = { track, loop }
-    setReviewMode(true)
+    setEditorTool('review')
     setLoop(true)
     if (assets.some((asset) => asset.role === 'lead')) switchTrack('lead')
     selectReviewItem(reviewItems[0])
@@ -628,15 +900,216 @@ function App() {
   const finishReview = () => {
     const previous = reviewReturnRef.current
     reviewReturnRef.current = null
-    setReviewMode(false)
+    setEditorTool('none')
     setSelectedNoteId(null)
     setSelectedChordId(null)
+    setPhraseReviewIds([])
     if (!previous) return
     setLoop(previous.loop)
     if (assets.some((asset) => asset.role === previous.track)) {
       switchTrack(previous.track)
     }
   }
+
+  const startPhraseWorkshop = () => {
+    if (!project || !project.tab.notes.length || editorTool !== 'none') return
+    phraseScrollRef.current = editorRef.current?.scrollTop ?? 0
+    const scoreTick = selectedNote
+      ? selectedNote.score_tick
+      : audioFrameToScoreTick(
+          Math.round(currentTime * project.tab.sample_rate),
+          project.tab.sync_anchors,
+        )
+    const requestedBar = barForScoreTick(project.tab, scoreTick)
+    const requested = phraseBars.find((candidate) => candidate.number === requestedBar)
+    const bar = (requested?.noteCount
+      ? requested
+      : [...phraseBars]
+          .filter((candidate) => candidate.noteCount > 0)
+          .sort((left, right) => Math.abs(left.number - requestedBar) - Math.abs(right.number - requestedBar))[0]
+    )?.number ?? 1
+    const mode: FingeringMode = 'balanced'
+    setSelectedChordId(null)
+    setPhraseSession({
+      startBar: bar,
+      endBar: bar,
+      mode,
+      allowedStrings: Array.from(
+        { length: project.tab.tuning.length },
+        (_, index) => index + 1,
+      ),
+      minFret: null,
+      maxFret: null,
+      name: phraseName(bar, bar, mode),
+      nameTouched: false,
+      previousLoop: loop,
+    })
+    phraseBarAnchorRef.current = null
+    setLoop(true)
+    setEditorTool('phrase')
+  }
+
+  const updatePhraseRange = (startBar: number, endBar: number) => {
+    if (!phraseSession || !phraseBars.length) return
+    const minimum = phraseBars[0].number
+    const maximum = phraseBars.at(-1)!.number
+    const nextStart = Math.max(minimum, Math.min(startBar, endBar, maximum))
+    const nextEnd = Math.min(maximum, Math.max(startBar, endBar, minimum))
+    setPhraseSession((current) =>
+      current
+        ? {
+            ...current,
+            startBar: nextStart,
+            endBar: nextEnd,
+            name: current.nameTouched
+              ? current.name
+              : phraseName(nextStart, nextEnd, current.mode),
+          }
+        : current,
+    )
+  }
+
+  const cancelPhraseWorkshop = () => {
+    if (!phraseSession) return
+    setLoop(phraseSession.previousLoop)
+    setPhraseSession(null)
+    setEditorTool('none')
+    window.requestAnimationFrame(() => {
+      if (editorRef.current) editorRef.current.scrollTop = phraseScrollRef.current
+      phraseLaunchRef.current?.focus()
+    })
+  }
+
+  const savePhraseVersion = async () => {
+    if (
+      !project ||
+      !phraseSession ||
+      !phraseRange ||
+      !phrasePlanResult.plan ||
+      !phrasePlanResult.plan.changes.length ||
+      savingRef.current
+    ) return
+    const previousLoop = phraseSession.previousLoop
+    const changedIds = phrasePlanResult.plan.changes.map((change) => change.noteId)
+    savingRef.current = true
+    setSaving(true)
+    setError('')
+    try {
+      const next = toDesktopProject(
+        await desktopEditorClient.refingerProject({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          sourceVersionId: project.active_version_id,
+          mode: phraseSession.mode,
+          name: phraseSession.name.trim(),
+          range: {
+            startScoreTick: phraseRange.startScoreTick,
+            endScoreTick: phraseRange.endScoreTick,
+          },
+          constraints: {
+            allowedStrings: phraseSession.allowedStrings,
+            minFret: phraseSession.minFret,
+            maxFret: phraseSession.maxFret,
+          },
+        }),
+      )
+      keepToolForVersionChangeRef.current = true
+      adoptProject(next, false)
+      setLoop(previousLoop)
+      setPhraseSession(null)
+      setPhraseReviewIds(changedIds)
+      setEditorTool('review')
+      setSelectedChordId(null)
+      setSelectedNoteId(changedIds[0] ?? null)
+      setNotice(
+        `Version created · ${changedIds.length} moved ${changedIds.length === 1 ? 'note returned' : 'notes returned'} to Review`,
+      )
+      window.requestAnimationFrame(() => {
+        if (editorRef.current) editorRef.current.scrollTop = phraseScrollRef.current
+        document.querySelector<HTMLElement>('.note-inspector button')?.focus()
+      })
+    } catch (saveError) {
+      if (saveError instanceof ApiError && saveError.status === 409) {
+        const fresh = await loadDesktopProject(project.id)
+        adoptProject(fresh, false)
+        setLoop(previousLoop)
+        setPhraseSession(null)
+        setPhraseReviewIds([])
+        setEditorTool('none')
+        setError('The project changed. Latest version loaded; reopen Phrase Workshop to preview again.')
+        window.requestAnimationFrame(() => phraseLaunchRef.current?.focus())
+      } else {
+        setError(saveError instanceof Error ? saveError.message : 'Could not save phrase version')
+      }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  const startBeatMap = () => {
+    if (!project || editorTool !== 'none') return
+    const value = beatMapFromTab(project.tab)
+    setBeatMapDraft(value)
+    setBeatMapBaseline(JSON.stringify(value))
+    setBeatMapError(null)
+    setBeatClickEnabled(false)
+    setSelectedNoteId(null)
+    setSelectedChordId(null)
+    setEditorTool('beat-map')
+  }
+
+  const cancelBeatMap = () => {
+    setBeatMapDraft(null)
+    setBeatMapBaseline('')
+    setBeatMapError(null)
+    setBeatClickEnabled(false)
+    setEditorTool('none')
+    window.requestAnimationFrame(() => timingLaunchRef.current?.focus())
+  }
+
+  const applyBeatMap = async (value: BeatMapEditorValue) => {
+    if (!project || savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
+    setBeatMapError(null)
+    try {
+      const next = toDesktopProject(
+        await desktopEditorClient.applyVersionAction({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          action: {
+            type: 'replace-beat-map',
+            versionId: project.active_version_id,
+            beatMap: value,
+          },
+        }),
+      )
+      adoptProject(next, false)
+      setBeatMapDraft(null)
+      setBeatMapBaseline('')
+      setBeatClickEnabled(false)
+      setPhraseSession(null)
+      setEditorTool('none')
+      setNotice(`Timing applied to ${activeVersion?.name ?? 'active version'}`)
+      window.requestAnimationFrame(() => timingLaunchRef.current?.focus())
+    } catch (saveError) {
+      if (saveError instanceof ApiError && saveError.status === 409) {
+        const fresh = await loadDesktopProject(project.id)
+        adoptProject(fresh, false)
+        setBeatMapError('The project changed. Latest timing loaded; your staged map was not applied.')
+      } else {
+        setBeatMapError(saveError instanceof Error ? saveError.message : 'Could not apply timing')
+      }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  const confirmBeatMapDiscard = () =>
+    !beatMapDirty ||
+    window.confirm('Timing changes are not applied. Discard them and continue?')
 
   const selectNextReview = (
     nextProject: Project,
@@ -926,6 +1399,16 @@ function App() {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && editorTool === 'phrase' && !savingRef.current) {
+        event.preventDefault()
+        cancelPhraseWorkshop()
+        return
+      }
+      if (event.key === 'Escape' && editorTool === 'beat-map' && !savingRef.current) {
+        event.preventDefault()
+        if (confirmBeatMapDiscard()) cancelBeatMap()
+        return
+      }
       const target = event.target
       const editingText =
         (target instanceof Element &&
@@ -1077,6 +1560,11 @@ function App() {
   }
 
   const chooseProject = async (summary: ProjectSummary) => {
+    if (!confirmBeatMapDiscard()) return
+    setBeatMapDraft(null)
+    setBeatMapBaseline('')
+    setPhraseSession(null)
+    setEditorTool('none')
     audioRef.current?.pause()
     setSaving(true)
     try {
@@ -1109,6 +1597,11 @@ function App() {
 
   const activateVersion = async (version: TabVersionSummary) => {
     if (!project || savingRef.current) return
+    if (!confirmBeatMapDiscard()) return
+    setBeatMapDraft(null)
+    setBeatMapBaseline('')
+    setPhraseSession(null)
+    setEditorTool('none')
     savingRef.current = true
     setSaving(true)
     try {
@@ -1132,6 +1625,11 @@ function App() {
 
   const duplicateVersion = async (version: TabVersionSummary) => {
     if (!project || savingRef.current) return
+    if (!confirmBeatMapDiscard()) return
+    setBeatMapDraft(null)
+    setBeatMapBaseline('')
+    setPhraseSession(null)
+    setEditorTool('none')
     savingRef.current = true
     setSaving(true)
     try {
@@ -1403,7 +1901,7 @@ function App() {
   }
 
   const enterPlayMode = () => {
-    if (!project?.tab.notes.length || saving) return
+    if (!project?.tab.notes.length || saving || editorTool !== 'none') return
     setSelectedNoteId(null)
     setRailOpen(false)
     setViewMode('play')
@@ -1507,7 +2005,7 @@ function App() {
       className={
         viewMode === 'play'
           ? 'play-shell'
-          : `app-shell ${selectedNote || selectedChord ? 'has-inspector' : ''}`
+          : `app-shell ${selectedNote || selectedChord || editorTool === 'phrase' ? 'has-inspector' : ''} tool-${editorTool}`
       }
     >
       <audio ref={bindAudio} preload="metadata" />
@@ -1593,7 +2091,7 @@ function App() {
             <span>Tab version</span>
             <select
               aria-label="Tab version"
-              disabled={saving}
+              disabled={saving || editorTool !== 'none'}
               value={project.active_version_id}
               onChange={(event) => {
                 const version = project.versions.find(
@@ -1612,7 +2110,7 @@ function App() {
           <button
             type="button"
             className="version-manage"
-            disabled={saving}
+            disabled={saving || editorTool !== 'none'}
             onClick={() => setVersionOpen(true)}
           >
             Manage
@@ -1624,7 +2122,7 @@ function App() {
           </button>
           <button
             type="button"
-            disabled={saving || !project.tab.notes.length}
+            disabled={saving || editorTool !== 'none' || !project.tab.notes.length}
             aria-label={
               project.tab.notes.length
                 ? 'Play'
@@ -1692,7 +2190,7 @@ function App() {
           <button
             className="button choose-song"
             type="button"
-            disabled={saving}
+            disabled={saving || editorTool !== 'none'}
             onClick={() => setUploadOpen(true)}
           >
             <Icon name="folder" />
@@ -1711,7 +2209,7 @@ function App() {
           <button
             className="button rail-choice"
             type="button"
-            disabled={saving}
+            disabled={saving || editorTool !== 'none'}
             onClick={() => bundleInputRef.current?.click()}
           >
             Import SoloTrace project
@@ -1722,7 +2220,7 @@ function App() {
               <div className="project-list-row" key={candidate.id}>
                 <button
                   type="button"
-                  disabled={saving}
+                  disabled={saving || editorTool !== 'none'}
                   className={candidate.id === project.id ? 'active' : ''}
                   onClick={() => void chooseProject(candidate)}
                 >
@@ -1736,7 +2234,7 @@ function App() {
                   type="button"
                   className="project-manage-button"
                   aria-label={`Manage ${candidate.title}`}
-                  disabled={saving}
+                  disabled={saving || editorTool !== 'none'}
                   onClick={() => {
                     void (
                       candidate.id === project.id
@@ -1924,14 +2422,14 @@ function App() {
             )}
           </div>
           <div className="rail-group">
-            <p className="rail-label">Draft style</p>
+            <p className="rail-label">Whole-tab style</p>
             <button
               type="button"
               className={`rail-choice ${
                 activeVersion?.fingering_mode === 'balanced' ? 'active' : ''
               }`}
               aria-pressed={activeVersion?.fingering_mode === 'balanced'}
-              disabled={saving || !project.tab.notes.length}
+              disabled={saving || editorTool !== 'none' || !project.tab.notes.length}
               onClick={() => void refinger('balanced')}
             >
               Balanced
@@ -1942,7 +2440,7 @@ function App() {
                 activeVersion?.fingering_mode === 'easiest' ? 'active' : ''
               }`}
               aria-pressed={activeVersion?.fingering_mode === 'easiest'}
-              disabled={saving || !project.tab.notes.length}
+              disabled={saving || editorTool !== 'none' || !project.tab.notes.length}
               onClick={() => void refinger('easiest')}
             >
               Easiest
@@ -1953,7 +2451,7 @@ function App() {
                 activeVersion?.fingering_mode === 'position' ? 'active' : ''
               }`}
               aria-pressed={activeVersion?.fingering_mode === 'position'}
-              disabled={saving || !project.tab.notes.length}
+              disabled={saving || editorTool !== 'none' || !project.tab.notes.length}
               onClick={() => void refinger('position')}
             >
               Stay in one position
@@ -1962,9 +2460,14 @@ function App() {
             <button
               type="button"
               className="rail-choice danger-text"
-              disabled={saving || !project.tab.notes.length}
+              disabled={saving || editorTool !== 'none' || !project.tab.notes.length}
               onClick={() =>
-                void refinger(activeVersion?.fingering_mode ?? 'balanced', 'clear')
+                void refinger(
+                  activeVersion?.fingering_mode === 'mixed'
+                    ? 'balanced'
+                    : activeVersion?.fingering_mode ?? 'balanced',
+                  'clear',
+                )
               }
             >
               Start fresh
@@ -1989,7 +2492,7 @@ function App() {
           </div>
         </aside>
 
-        <main className="editor">
+        <main ref={editorRef} className="editor">
           <PipelineStrip
             run={project.run}
             onCancel={() => {
@@ -2031,7 +2534,7 @@ function App() {
               <button
                 className="button secondary find-chords-button"
                 type="button"
-                disabled={processing || !capabilities?.chords?.available}
+                disabled={editorTool !== 'none' || processing || !capabilities?.chords?.available}
                 onClick={() => void createChordDraft()}
                 title={capabilities?.chords?.detail}
               >
@@ -2041,24 +2544,44 @@ function App() {
               <button
                 type="button"
                 className="button secondary add-note-button"
-                disabled={saving}
+                disabled={saving || editorTool !== 'none'}
                 onClick={addNoteAtPlayhead}
               >
                 Add note
               </button>
             </div>
-            {!reviewMode ? (
-              <button
-                type="button"
-                className="button primary review-launch"
-                disabled={!reviewItems.length}
-                onClick={startReview}
-              >
-                {reviewItems.length
-                  ? `Review · ${reviewItems.length} remaining`
-                  : 'Review complete'}
-              </button>
-            ) : (
+            {editorTool === 'none' && (
+              <div className="editor-tool-launchers" role="group" aria-label="Editing tools">
+                <button
+                  ref={phraseLaunchRef}
+                  type="button"
+                  className="button secondary phrase-launch"
+                  disabled={!project.tab.notes.length}
+                  onClick={startPhraseWorkshop}
+                >
+                  Work on phrase
+                </button>
+                <button
+                  ref={timingLaunchRef}
+                  type="button"
+                  className="button secondary timing-launch"
+                  onClick={startBeatMap}
+                >
+                  Edit timing
+                </button>
+                <button
+                  type="button"
+                  className="button primary review-launch"
+                  disabled={!reviewItems.length}
+                  onClick={startReview}
+                >
+                  {reviewItems.length
+                    ? `Review · ${reviewItems.length} remaining`
+                    : 'Review complete'}
+                </button>
+              </div>
+            )}
+            {reviewMode && (
               <div className="review-session-tools" role="group" aria-label="Review session">
                 <button
                   type="button"
@@ -2090,21 +2613,66 @@ function App() {
                 </button>
               </div>
             )}
+            {editorTool === 'phrase' && (
+              <span className="active-tool-status">Phrase Workshop · bars {phraseSession?.startBar}–{phraseSession?.endBar}</span>
+            )}
+            {editorTool === 'beat-map' && (
+              <span className="active-tool-status">Editing timing for {activeVersion?.name ?? 'active version'}</span>
+            )}
           </section>
 
           <div className="editor-canvas">
-            <Waveform
+            {editorTool === 'beat-map' && beatMapDraft ? (
+              <BeatMapEditor
+                value={beatMapDraft}
+                versionName={activeVersion?.name ?? 'Active version'}
+                duration={project.duration_s}
+                sampleRate={project.tab.sample_rate}
+                ticksPerQuarter={project.tab.ticks_per_quarter}
+                peaks={project.waveform_peaks}
+                currentTime={currentTime}
+                isPlaying={playing}
+                noteOnsets={project.tab.notes.map((note) => note.audio_onset_s)}
+                dirty={beatMapDirty}
+                saving={saving}
+                error={beatMapError}
+                clickPreviewEnabled={beatClickEnabled}
+                onChange={setBeatMapDraft}
+                onSeek={seek}
+                onClickPreviewChange={setBeatClickEnabled}
+                onApply={(value) => void applyBeatMap(value)}
+                onCancel={cancelBeatMap}
+                tabPreview={(
+                  <TabEditor
+                    project={beatMapPreviewProject ?? project}
+                    currentTime={currentTime}
+                    selectedNoteId={null}
+                    selectedChordId={null}
+                    readOnly
+                    onSelectNote={(noteId) => {
+                      const note = project.tab.notes.find((candidate) => candidate.id === noteId)
+                      if (note) seek(note.audio_onset_s)
+                    }}
+                    onSelectChord={(chord) => seek(chord.audio_onset_s)}
+                    onSeek={seek}
+                    onFingeringChange={() => undefined}
+                  />
+                )}
+              />
+            ) : (
+              <>
+              <Waveform
               audio={audioElement}
               audioUrl={currentAsset?.url ?? ''}
               currentTime={currentTime}
               duration={project.duration_s}
               peaks={project.waveform_peaks}
               passage={passage}
-              selectionEnabled={draftScope === 'passage'}
+              selectionEnabled={editorTool === 'none' && draftScope === 'passage'}
               onPassageChange={updatePassage}
               onSeek={seek}
             />
-            <div className="draft-action-row">
+            {editorTool === 'none' && <div className="draft-action-row">
               <div className="draft-scope">
                 <label className="section-toggle">
                   <input
@@ -2191,7 +2759,7 @@ function App() {
                       : 'Transcribe selected section'}
                 </button>
               </div>
-            </div>
+            </div>}
             <TabEditor
               project={project}
               currentTime={currentTime}
@@ -2210,12 +2778,80 @@ function App() {
               onFingeringChange={changeFingering}
               onChordBoundaryMove={moveBoundary}
               onAddChord={addChordAtPlayhead}
-              disabled={saving}
+              disabled={saving || editorTool === 'phrase'}
+              phraseBars={phraseBars}
+              phraseRange={phraseRange}
+              phrasePreviewNotes={phrasePlanResult.plan?.notes ?? []}
+              onPhraseBarSelect={(bar, extend) => {
+                if (!phraseSession) return
+                if (!extend && phraseBarAnchorRef.current === null) {
+                  phraseBarAnchorRef.current = bar
+                  updatePhraseRange(bar, bar)
+                  return
+                }
+                const anchor = extend
+                  ? phraseBarAnchorRef.current ?? phraseSession.startBar
+                  : phraseBarAnchorRef.current ?? bar
+                updatePhraseRange(
+                  Math.min(anchor, bar),
+                  Math.max(anchor, bar),
+                )
+                phraseBarAnchorRef.current = null
+              }}
             />
+              </>
+            )}
           </div>
         </main>
 
-        {selectedNote && (
+        {editorTool === 'phrase' && phraseSession && (
+          <PhraseWorkshop
+            bars={phraseBars}
+            startBar={phraseSession.startBar}
+            endBar={phraseSession.endBar}
+            mode={phraseSession.mode}
+            allowedStrings={phraseSession.allowedStrings}
+            stringCount={project.tab.tuning.length}
+            fretCount={availableFretCount(project.tab)}
+            minFret={phraseSession.minFret}
+            maxFret={phraseSession.maxFret}
+            name={phraseSession.name}
+            preview={phrasePreview}
+            saving={saving}
+            onRangeChange={updatePhraseRange}
+            onModeChange={(mode) =>
+              setPhraseSession((current) =>
+                current
+                  ? {
+                      ...current,
+                      mode,
+                      name: current.nameTouched
+                        ? current.name
+                        : phraseName(current.startBar, current.endBar, mode),
+                    }
+                  : current,
+              )
+            }
+            onAllowedStringsChange={(allowedStrings) =>
+              setPhraseSession((current) =>
+                current ? { ...current, allowedStrings } : current,
+              )
+            }
+            onFretRangeChange={(minFret, maxFret) =>
+              setPhraseSession((current) =>
+                current ? { ...current, minFret, maxFret } : current,
+              )
+            }
+            onNameChange={(name) =>
+              setPhraseSession((current) =>
+                current ? { ...current, name, nameTouched: true } : current,
+              )
+            }
+            onCancel={cancelPhraseWorkshop}
+            onSave={() => void savePhraseVersion()}
+          />
+        )}
+        {selectedNote && editorTool !== 'phrase' && editorTool !== 'beat-map' && (
           <NoteInspector
             note={selectedNote}
             saving={saving}
@@ -2232,7 +2868,7 @@ function App() {
             }}
           />
         )}
-        {selectedChord && (
+        {selectedChord && editorTool !== 'phrase' && editorTool !== 'beat-map' && (
           <ChordInspector
             chord={selectedChord}
             index={selectedChordIndex}

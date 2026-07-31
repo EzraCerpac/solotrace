@@ -1,4 +1,5 @@
-import { scoreTickToAudioFrame } from './music'
+import { beatMapFromTab, ticksPerMeasure } from '@solotrace/editor'
+import { audioFrameToScoreTick, scoreTickToAudioFrame } from './music'
 import type { NoteEvent, Project } from './types'
 
 export type RestValue = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth'
@@ -124,30 +125,36 @@ function minimumMeasureWidth(notes: NoteEvent[]): number {
   return Math.min(720, Math.max(MINIMUM_MEASURE_WIDTH, 92 + densestString * 44))
 }
 
-function measureBoundaries(project: Project, measureCount: number): number[] {
-  const [beats, beatType] = project.tab.time_signature
-  const ticksPerMeasure =
-    project.tab.ticks_per_quarter * beats * (4 / beatType)
+interface MeasureSpan {
+  number: number
+  start_s: number
+  end_s: number
+  start_tick: number
+  end_tick: number
+}
+
+function measureSpans(project: Project): MeasureSpan[] {
+  const measureTicks = ticksPerMeasure(
+    project.tab.ticks_per_quarter,
+    project.tab.time_signature,
+  )
+  const barOffsetTicks = beatMapFromTab(project.tab).bar_offset_ticks
   const quarterSeconds = 60 / Math.max(1, project.tab.tempo_bpm)
   const fallbackFramesPerTick =
     (quarterSeconds * project.tab.sample_rate) / project.tab.ticks_per_quarter
   const anchors = [...project.tab.sync_anchors].sort(
     (left, right) => left.score_tick - right.score_tick,
   )
-  if (anchors.length === 0) {
-    return Array.from(
-      { length: measureCount + 1 },
-      (_, index) => index * ticksPerMeasure * fallbackFramesPerTick / project.tab.sample_rate,
-    )
-  }
-
   const first = anchors[0]
-  const estimatedSongTick = Math.round(
-    (first.audio_frame / project.tab.sample_rate / quarterSeconds) *
-      project.tab.ticks_per_quarter,
-  )
-  const localTickOffset = estimatedSongTick - first.score_tick
+  const estimatedSongTick = first
+    ? Math.round(
+        (first.audio_frame / project.tab.sample_rate / quarterSeconds) *
+          project.tab.ticks_per_quarter,
+      )
+    : 0
+  const localTickOffset = first ? estimatedSongTick - first.score_tick : 0
   const frameForSongTick = (songTick: number) => {
+    if (!first) return Math.round(songTick * fallbackFramesPerTick)
     const localTick = songTick - localTickOffset
     if (localTick >= first.score_tick) {
       return scoreTickToAudioFrame(localTick, anchors)
@@ -160,35 +167,62 @@ function measureBoundaries(project: Project, measureCount: number): number[] {
         : fallbackFramesPerTick
     return Math.round(first.audio_frame + (localTick - first.score_tick) * framesPerTick)
   }
+  const durationFrame = Math.round(project.duration_s * project.tab.sample_rate)
+  const endSongTick = anchors.length
+    ? audioFrameToScoreTick(durationFrame, anchors) + localTickOffset
+    : Math.round(durationFrame / fallbackFramesPerTick)
+  // Pickup phase is stored in passage-local score ticks. Shift that phase into
+  // the song-wide coordinate system used by the playback layout. A zero pickup
+  // keeps the established song-wide bar grid for legacy/local-anchor projects.
+  const songBarOffsetTicks = barOffsetTicks > 0
+    ? ((localTickOffset + barOffsetTicks) % measureTicks + measureTicks) % measureTicks
+    : 0
+  const tickBoundaries = [0]
+  let nextTick = songBarOffsetTicks > 0 ? songBarOffsetTicks : measureTicks
+  while (nextTick < endSongTick && tickBoundaries.length < 10_000) {
+    tickBoundaries.push(nextTick)
+    nextTick += measureTicks
+  }
+  tickBoundaries.push(nextTick)
 
-  return Array.from({ length: measureCount + 1 }, (_, index) => {
-    if (index === 0) return 0
-    if (index === measureCount) return project.duration_s
-    return Math.max(
-      0,
-      Math.min(
-        project.duration_s,
-        frameForSongTick(index * ticksPerMeasure) / project.tab.sample_rate,
-      ),
-    )
+  return tickBoundaries.slice(0, -1).map((startTick, index) => {
+    const endTick = tickBoundaries[index + 1]
+    const start = index === 0
+      ? 0
+      : Math.max(
+          0,
+          Math.min(project.duration_s, frameForSongTick(startTick) / project.tab.sample_rate),
+        )
+    const end = index === tickBoundaries.length - 2
+      ? project.duration_s
+      : Math.max(
+          start,
+          Math.min(project.duration_s, frameForSongTick(endTick) / project.tab.sample_rate),
+        )
+    return {
+      number: songBarOffsetTicks > 0 ? index : index + 1,
+      start_s: start,
+      end_s: end,
+      start_tick: startTick,
+      end_tick: endTick,
+    }
   })
 }
 
 export function buildPlayMeasures(project: Project): PlayMeasure[] {
-  const [beats, beatType] = project.tab.time_signature
   const quarterSeconds = 60 / Math.max(1, project.tab.tempo_bpm)
-  const measureSeconds = quarterSeconds * beats * (4 / beatType)
-  const sixteenthSeconds = quarterSeconds / 4
-  const measureCount = Math.max(1, Math.ceil(project.duration_s / measureSeconds))
-  const boundaries = measureBoundaries(project, measureCount)
+  const fallbackSixteenthSeconds = quarterSeconds / 4
+  const spans = measureSpans(project)
 
-  return Array.from({ length: measureCount }, (_, index) => {
-    const start = boundaries[index]
-    const anchoredEnd = boundaries[index + 1]
-    const end =
-      anchoredEnd > start
-        ? anchoredEnd
-        : Math.min(project.duration_s, start + measureSeconds)
+  return spans.map((span, index) => {
+    const start = span.start_s
+    const end = span.end_s
+    const sixteenthUnits =
+      (span.end_tick - span.start_tick) / (project.tab.ticks_per_quarter / 4)
+    const sixteenthSeconds =
+      end > start && sixteenthUnits > 0
+        ? (end - start) / sixteenthUnits
+        : fallbackSixteenthSeconds
     const soundingNotes = project.tab.notes.filter(
       (note) => note.audio_offset_s > start && note.audio_onset_s < end,
     )
@@ -196,15 +230,15 @@ export function buildPlayMeasures(project: Project): PlayMeasure[] {
       (note) =>
         note.audio_onset_s >= start &&
         (note.audio_onset_s < end ||
-          (index === measureCount - 1 && note.audio_onset_s <= end)),
+          (index === spans.length - 1 && note.audio_onset_s <= end)),
     )
     return {
-      number: index + 1,
+      number: span.number,
       start_s: start,
       end_s: end,
       notes,
       rests: soundingNotes.length
-        ? restsForMeasure(index + 1, start, end, soundingNotes, sixteenthSeconds)
+        ? restsForMeasure(span.number, start, end, soundingNotes, sixteenthSeconds)
         : [],
       has_tab_notes: soundingNotes.length > 0,
       minimum_width: minimumMeasureWidth(notes),

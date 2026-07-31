@@ -5,7 +5,7 @@ import type {
   ChordTrack,
   EditorProject,
   Fingering,
-  FingeringMode,
+  VersionFingeringStyle,
   NoteEvent,
   TabVersion,
 } from './types'
@@ -225,14 +225,14 @@ function isVersion(value: unknown): value is TabVersion {
       : []
   const availableFretCount =
     isInteger(fretCount) && isInteger(capoFret) ? fretCount - capoFret : -1
-  const modes = new Set<FingeringMode>(['balanced', 'easiest', 'position'])
+  const modes = new Set<VersionFingeringStyle>(['balanced', 'easiest', 'position', 'mixed'])
   if (
     typeof value.id !== 'string' ||
     value.id.length === 0 ||
     typeof value.name !== 'string' ||
     value.name.length === 0 ||
     typeof value.source !== 'string' ||
-    !modes.has(value.fingering_mode as FingeringMode) ||
+    !modes.has(value.fingering_mode as VersionFingeringStyle) ||
     typeof value.created_at !== 'string' ||
     typeof value.updated_at !== 'string' ||
     !isInteger(tab.sample_rate) ||
@@ -258,6 +258,9 @@ function isVersion(value: unknown): value is TabVersion {
       preferredFret === null ||
       (isInteger(preferredFret) && preferredFret >= 0 && preferredFret <= availableFretCount)
     ) ||
+    !isInteger(tab.bar_offset_ticks) ||
+    tab.bar_offset_ticks < 0 ||
+    tab.bar_offset_ticks >= (tab.ticks_per_quarter * 4 * timeSignature[0]) / timeSignature[1] ||
     !Array.isArray(tab.sync_anchors) ||
     !tab.sync_anchors.every(
       (anchor) =>
@@ -285,6 +288,7 @@ export function isEditorProject(value: unknown): value is EditorProject {
       if (!isRecord(version) || !isRecord(version.tab)) return
       if (version.tab.capo_fret === undefined) version.tab.capo_fret = 0
       if (version.tab.preferred_fret === undefined) version.tab.preferred_fret = null
+      if (version.tab.bar_offset_ticks === undefined) version.tab.bar_offset_ticks = 0
     })
   }
   const versions = value.versions

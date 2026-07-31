@@ -87,6 +87,7 @@ test('phrase constraints preserve locked corrections and fail with structured er
     constraints: { allowedStrings: [2], minFret: 8, maxFret: 12 },
   })
   assert.deepEqual([plan.notes[0].string, plan.notes[0].fret], [1, 5])
+  assert.deepEqual(plan.notes[0], locked)
   assert.equal(plan.lockedNoteCount, 1)
   assert.equal(plan.changes.length, 0)
 

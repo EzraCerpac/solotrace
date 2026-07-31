@@ -165,6 +165,8 @@ export class DesktopEditorClient implements EditorClientAdapter {
         request.mode,
         request.name,
         request.lockPolicy,
+        request.range,
+        request.constraints,
       ),
     )
   }
@@ -203,6 +205,16 @@ export class DesktopEditorClient implements EditorClientAdapter {
           action.versionId,
           expectedRevision,
           action.track,
+        ),
+      )
+    }
+    if (action.type === 'replace-beat-map') {
+      return toEditorProject(
+        await api.patchBeatMap(
+          projectId,
+          action.versionId,
+          expectedRevision,
+          action.beatMap,
         ),
       )
     }

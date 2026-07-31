@@ -45,7 +45,7 @@ def _project_payload(raw: bytes) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ProjectImportError("Project bundle contains invalid project data")
     if payload.get("format") == PROJECT_FORMAT:
-        if payload.get("schemaVersion") not in {1, PROJECT_SCHEMA_VERSION}:
+        if payload.get("schemaVersion") not in range(1, PROJECT_SCHEMA_VERSION + 1):
             raise ProjectImportError("Project bundle uses an unsupported schema version")
         project = payload.get("project")
         if not isinstance(project, dict):

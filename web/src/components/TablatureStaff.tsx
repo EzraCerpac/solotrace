@@ -35,6 +35,8 @@ interface TablatureStaffProps {
   selectedNoteId?: string | null
   editable?: boolean
   disabled?: boolean
+  phraseRange?: { startScoreTick: number; endScoreTick: number } | null
+  phrasePreviewNotes?: readonly NoteEvent[]
   ariaLabel: string
   description: string
   onNoteActivate: (note: NoteEvent) => void
@@ -88,6 +90,8 @@ export function TablatureStaff({
   selectedNoteId = null,
   editable = false,
   disabled = false,
+  phraseRange = null,
+  phrasePreviewNotes = [],
   ariaLabel,
   description,
   onNoteActivate,
@@ -101,6 +105,7 @@ export function TablatureStaff({
     fingering: Fingering
   } | null>(null)
   const yForString = (string: number) => STAFF_TOP + (string - 1) * STRING_GAP
+  const previewById = new Map(phrasePreviewNotes.map((note) => [note.id, note]))
 
   return (
     <svg
@@ -150,16 +155,26 @@ export function TablatureStaff({
         />
       )}
       {notes.map(({ note, x, endX }) => {
+        const preview = previewById.get(note.id)
+        const previewChanged = Boolean(
+          preview && (preview.string !== note.string || preview.fret !== note.fret),
+        )
+        const displayedNote = previewChanged ? preview! : note
         const activeFingering =
           drag?.noteId === note.id
             ? drag.fingering
-            : { string: note.string, fret: note.fret, label: '', cost: 0 }
+            : { string: displayedNote.string, fret: displayedNote.fret, label: '', cost: 0 }
         const y = yForString(activeFingering.string)
         const selected = selectedNoteId === note.id
         const playing =
           currentTime >= note.audio_onset_s && currentTime <= note.audio_offset_s
         const needsReview =
           !note.reviewed && minimumConfidence(note.confidence) < 0.72
+        const outsidePhrase = Boolean(
+          phraseRange &&
+            (note.score_tick < phraseRange.startScoreTick ||
+              note.score_tick >= phraseRange.endScoreTick),
+        )
         return (
           <g
             key={note.id}
@@ -171,11 +186,19 @@ export function TablatureStaff({
               needsReview ? 'needs-review' : '',
               note.reviewed ? 'reviewed' : '',
               disabled ? 'is-disabled' : '',
+              outsidePhrase ? 'outside-phrase' : '',
+              previewChanged ? 'phrase-preview-changed' : '',
             ].join(' ')}
             role="button"
             tabIndex={disabled ? -1 : 0}
             aria-disabled={disabled}
-            aria-label={editable ? noteLabel(note) : `${noteLabel(note)}. Jump to note.`}
+            aria-label={
+              previewChanged
+                ? `${pitchName(note.midi_pitch)}, proposed string ${displayedNote.string}, fret ${displayedNote.fret}; current string ${note.string}, fret ${note.fret}`
+                : editable
+                  ? noteLabel(note)
+                  : `${noteLabel(note)}. Jump to note.`
+            }
             onClick={(event) => {
               event.stopPropagation()
               if (!disabled) onNoteActivate(note)
@@ -242,6 +265,25 @@ export function TablatureStaff({
             }}
             onPointerCancel={() => setDrag(null)}
           >
+            {previewChanged && (
+              <g
+                className="phrase-fingering-ghost"
+                aria-hidden="true"
+                transform={`translate(0 ${yForString(note.string) - y})`}
+              >
+                <line
+                  className="note-duration"
+                  x1={x}
+                  x2={Math.max(x + 14, endX)}
+                  y1={y}
+                  y2={y}
+                />
+                <rect x={x - 12} y={y - 14} width={28} height={28} rx={6} />
+                <text x={x + 2} y={y + 5} textAnchor="middle">
+                  {note.fret}
+                </text>
+              </g>
+            )}
             {selected && (
               <line
                 className="note-stitch"

@@ -199,6 +199,14 @@ def test_local_origin_guard_and_reserved_api_routes(tmp_path, monkeypatch) -> No
             headers={"Origin": "http://127.0.0.1:5173"},
         )
         assert local_development.status_code == 405
+        named_local_development = client.post(
+            "/api/definitely-not-a-route",
+            headers={
+                "Host": "solotrace.localhost:1355",
+                "Origin": "https://solotrace.localhost:1355",
+            },
+        )
+        assert named_local_development.status_code == 405
         blocked = client.post(
             f"/api/projects/{DEMO_ID}/refinger",
             json={

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 ProcessingEngine = Literal["preview", "mvsep"]
 FingeringMode = Literal["balanced", "easiest", "position"]
+VersionFingeringStyle = Literal["balanced", "easiest", "position", "mixed"]
 ChordKind = Literal["chord", "no-chord", "unknown"]
 ChordQuality = Literal[
     "min",
@@ -172,6 +173,7 @@ class TabDocument(StrictModel):
     capo_fret: int = Field(default=0, ge=0, le=12)
     fret_count: int = Field(default=22, ge=12, le=36)
     preferred_fret: int | None = Field(default=None, ge=0, le=36)
+    bar_offset_ticks: int = Field(default=0, ge=0)
     sync_anchors: list[SyncAnchor] = Field(default_factory=list, max_length=5000)
     notes: list[NoteEvent] = Field(default_factory=list, max_length=10000)
     chords: ChordTrack = Field(default_factory=ChordTrack)
@@ -195,6 +197,12 @@ class TabDocument(StrictModel):
             raise ValueError("preferred fret exceeds the available fretboard")
         if max(self.sounding_tuning) + self.available_fret_count > 127:
             raise ValueError("tuning plus fret count exceeds the MIDI range")
+        beats, beat_unit = self.time_signature
+        measure_numerator = self.ticks_per_quarter * 4 * beats
+        if beats <= 0 or beat_unit not in {2, 4, 8, 16} or measure_numerator % beat_unit:
+            raise ValueError("time signature must divide into whole score ticks")
+        if self.bar_offset_ticks >= measure_numerator // beat_unit:
+            raise ValueError("pickup must be shorter than a complete bar")
         return self
 
     @property
@@ -265,7 +273,7 @@ class TabVersion(StrictModel):
     id: str = Field(min_length=1, max_length=96)
     name: str = Field(min_length=1, max_length=80)
     source: str = Field(default="draft", max_length=120)
-    fingering_mode: FingeringMode = "balanced"
+    fingering_mode: VersionFingeringStyle = "balanced"
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     tab: TabDocument
@@ -356,7 +364,7 @@ class TabVersionSummary(StrictModel):
     id: str
     name: str
     source: str
-    fingering_mode: FingeringMode
+    fingering_mode: VersionFingeringStyle
     created_at: str
     updated_at: str
     note_count: int = Field(ge=0)
@@ -459,11 +467,74 @@ class WorkspacePatch(ProjectMutationRequest):
     passage: Passage
 
 
+class PhraseScoreRange(StrictModel):
+    start_score_tick: int = Field(ge=0)
+    end_score_tick: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> PhraseScoreRange:
+        if self.end_score_tick <= self.start_score_tick:
+            raise ValueError("Phrase range end must be after its start")
+        return self
+
+
+class PhraseFingeringConstraints(StrictModel):
+    allowed_strings: list[int] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8,
+    )
+    min_fret: int | None = Field(default=None, ge=0, le=36)
+    max_fret: int | None = Field(default=None, ge=0, le=36)
+
+    @field_validator("allowed_strings")
+    @classmethod
+    def validate_strings(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        if len(value) != len(set(value)) or any(string < 1 or string > 8 for string in value):
+            raise ValueError("Allowed strings must be unique guitar string numbers")
+        return value
+
+    @model_validator(mode="after")
+    def validate_fret_range(self) -> PhraseFingeringConstraints:
+        if (
+            self.min_fret is not None
+            and self.max_fret is not None
+            and self.min_fret > self.max_fret
+        ):
+            raise ValueError("Minimum fret cannot exceed maximum fret")
+        return self
+
+
 class VersionCreateRequest(ProjectMutationRequest):
     source_version_id: str = Field(min_length=1, max_length=96)
     name: str | None = Field(default=None, min_length=1, max_length=80)
     mode: FingeringMode | None = None
     lock_policy: Literal["preserve", "clear"] = "preserve"
+    range: PhraseScoreRange | None = None
+    constraints: PhraseFingeringConstraints | None = None
+
+    @model_validator(mode="after")
+    def validate_phrase_request(self) -> VersionCreateRequest:
+        if self.range is not None and self.mode is None:
+            raise ValueError("Phrase refingering requires a fingering mode")
+        if self.constraints is not None and self.range is None:
+            raise ValueError("Fingering constraints require a phrase range")
+        if self.range is not None and self.lock_policy == "clear":
+            raise ValueError("Phrase refingering always preserves locked corrections")
+        return self
+
+
+class BeatMapDocument(StrictModel):
+    tempo_bpm: float = Field(gt=20, le=400)
+    time_signature: tuple[int, int] = (4, 4)
+    bar_offset_ticks: int = Field(default=0, ge=0)
+    sync_anchors: list[SyncAnchor] = Field(min_length=2, max_length=5000)
+
+
+class BeatMapPatch(ProjectMutationRequest):
+    beat_map: BeatMapDocument
 
 
 class VersionRenameRequest(ProjectMutationRequest):

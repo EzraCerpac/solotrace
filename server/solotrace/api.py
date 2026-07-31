@@ -26,16 +26,18 @@ from .audio import (
     probe_audio,
     waveform_peaks,
 )
+from .beat_map import BeatMap, apply_beat_map
 from .chords import normalize_edited_chords, recognition_capability
 from .config import Settings, delete_mvsep_token, store_mvsep_token
 from .demo import DEMO_ID, ensure_demo
 from .diagnostics import configure_logging, diagnostic_bundle
 from .editing import normalize_edited_notes
 from .exports import export_filename, export_payload, write_bundle
-from .fingering import assign_fingerings
+from .fingering import FingeringConstraints, assign_fingerings
 from .imports import ProjectImportError, import_project_bundle
 from .models import (
     AnalyzeChordsRequest,
+    BeatMapPatch,
     ChordPatch,
     HealthResponse,
     MediaAsset,
@@ -58,6 +60,7 @@ from .models import (
     WorkspacePatch,
     now_iso,
 )
+from .phrase import plan_phrase_fingering
 from .pipeline import Pipeline, new_run
 from .storage import ProjectStore, RevisionConflictError
 from .version import APP_VERSION, BUILD_ID, PACKAGED
@@ -110,7 +113,7 @@ app = FastAPI(
 )
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
+    allowed_hosts=["127.0.0.1", "localhost", "*.localhost", "[::1]", "testserver"],
 )
 
 
@@ -147,7 +150,9 @@ async def protect_local_mutations(request: Request, call_next):
             )
         if not PACKAGED and origin:
             hostname = urlsplit(origin).hostname
-            if hostname not in {"127.0.0.1", "localhost", "::1"}:
+            if hostname not in {"127.0.0.1", "localhost", "::1"} and not (
+                hostname and hostname.endswith(".localhost")
+            ):
                 return JSONResponse(
                     status_code=403,
                     content={"detail": "SoloTrace only accepts edits from its local app."},
@@ -697,7 +702,31 @@ def _create_version(project: Project, body: VersionCreateRequest) -> Project:
     source = _version_or_404(project, body.source_version_id)
     mode = body.mode
     notes = source.tab.notes
-    if mode is not None:
+    if body.range is not None:
+        if mode is None:  # The request model rejects this; keeps this helper total.
+            raise ValueError("Phrase refingering requires a fingering mode")
+        request_constraints = body.constraints
+        plan = plan_phrase_fingering(
+            source.tab,
+            start_score_tick=body.range.start_score_tick,
+            end_score_tick=body.range.end_score_tick,
+            mode=mode,
+            constraints=(
+                FingeringConstraints(
+                    allowed_strings=(
+                        frozenset(request_constraints.allowed_strings)
+                        if request_constraints.allowed_strings is not None
+                        else None
+                    ),
+                    min_fret=request_constraints.min_fret,
+                    max_fret=request_constraints.max_fret,
+                )
+                if request_constraints is not None
+                else None
+            ),
+        )
+        notes = plan.notes
+    elif mode is not None:
         input_notes = (
             [note.model_copy(update={"user_locked": False}) for note in source.tab.notes]
             if body.lock_policy == "clear"
@@ -731,13 +760,24 @@ def _create_version(project: Project, body: VersionCreateRequest) -> Project:
         "easiest": "Easiest",
         "position": "One position",
     }
-    name = _unique_version_name(project, body.name or default_names[mode])
+    default_name = (
+        f"Phrase · {default_names[mode]}" if body.range is not None else default_names[mode]
+    )
+    name = _unique_version_name(project, body.name or default_name)
     timestamp = now_iso()
     version = TabVersion(
         id=f"version-{uuid.uuid4().hex[:12]}",
         name=name,
-        source="duplicate" if mode is None else f"refinger-{mode}",
-        fingering_mode=source.fingering_mode if mode is None else mode,
+        source=(
+            f"phrase-{source.id}"
+            if body.range is not None
+            else "duplicate"
+            if mode is None
+            else f"refinger-{mode}"
+        ),
+        fingering_mode=(
+            "mixed" if body.range is not None else source.fingering_mode if mode is None else mode
+        ),
         created_at=timestamp,
         updated_at=timestamp,
         tab=source.tab.model_copy(update={"notes": notes}),
@@ -761,6 +801,50 @@ def create_version(
             project_id,
             lambda current: _create_version(current, body),
             reason=f"create tab version {body.mode or 'duplicate'}",
+            expected_revision=body.expected_revision,
+            bump_revision=True,
+        )
+        return _project_view(project)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except RevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.patch(
+    "/api/projects/{project_id}/versions/{version_id}/beat-map",
+    response_model=ProjectView,
+)
+def patch_beat_map(
+    project_id: str,
+    version_id: str,
+    body: BeatMapPatch,
+    request: Request,
+) -> ProjectView:
+    def update(project: Project) -> Project:
+        target = _version_or_404(project, version_id)
+        if project.active_version_id != version_id:
+            raise ValueError("Activate this tab version before editing its timing")
+        beat_map = BeatMap.model_validate(body.beat_map.model_dump())
+        # Coverage belongs to the version being edited. The workspace passage is
+        # mutable and may describe a different selection than this version.
+        tab = apply_beat_map(target.tab, beat_map)
+        timestamp = now_iso()
+        versions = [
+            version.model_copy(update={"tab": tab, "updated_at": timestamp})
+            if version.id == version_id
+            else version
+            for version in project.versions
+        ]
+        return project.model_copy(update={"versions": versions})
+
+    try:
+        project = _store(request).update(
+            project_id,
+            update,
+            reason="replace beat map",
             expected_revision=body.expected_revision,
             bump_revision=True,
         )

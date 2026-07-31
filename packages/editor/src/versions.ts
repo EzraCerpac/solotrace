@@ -1,6 +1,9 @@
 import { assignFingerings } from './fingering'
 import { availableFretCount, soundingTuning } from './instrument'
+import { applyBeatMap } from './beat-map'
+import { planPhraseFingering } from './phrase'
 import type {
+  BeatMapUpdate,
   EditorProject,
   FingeringMode,
   TabVersion,
@@ -20,6 +23,15 @@ export interface CreateRefingeredVersionOptions {
   name: string
   createdAt: string
   lockPolicy?: 'preserve' | 'clear'
+  range?: {
+    startScoreTick: number
+    endScoreTick: number
+  }
+  constraints?: {
+    allowedStrings?: readonly number[]
+    minFret?: number | null
+    maxFret?: number | null
+  }
 }
 
 export function createRefingeredVersion(
@@ -32,22 +44,32 @@ export function createRefingeredVersion(
   const sourceId = options.sourceVersionId ?? project.active_version_id
   const source = project.versions.find((version) => version.id === sourceId)
   if (!source) throw new Error(`Source version ${sourceId} does not exist`)
-  const inputNotes =
-    options.lockPolicy === 'clear'
-      ? source.tab.notes.map((note) => ({ ...note, user_locked: false }))
-      : source.tab.notes
-  const notes = assignFingerings(
-    inputNotes,
-    soundingTuning(source.tab),
-    availableFretCount(source.tab),
-    options.mode,
-    source.tab.preferred_fret,
-  )
+  if (options.range && options.lockPolicy === 'clear') {
+    throw new Error('Phrase refingering always preserves locked corrections')
+  }
+  if (options.constraints && !options.range) {
+    throw new Error('Fingering constraints require a phrase range')
+  }
+  const notes = options.range
+    ? planPhraseFingering(source.tab, {
+        range: options.range,
+        mode: options.mode,
+        constraints: options.constraints,
+      }).notes
+    : assignFingerings(
+        options.lockPolicy === 'clear'
+          ? source.tab.notes.map((note) => ({ ...note, user_locked: false }))
+          : source.tab.notes,
+        soundingTuning(source.tab),
+        availableFretCount(source.tab),
+        options.mode,
+        source.tab.preferred_fret,
+      )
   const version: TabVersion = {
     id: options.versionId,
     name: options.name,
-    source: `refingered:${source.id}`,
-    fingering_mode: options.mode,
+    source: options.range ? `phrase:${source.id}` : `refingered:${source.id}`,
+    fingering_mode: options.range ? 'mixed' : options.mode,
     created_at: options.createdAt,
     updated_at: options.createdAt,
     tab: {
@@ -114,6 +136,16 @@ export function applyVersionAction(
             ...version,
             updated_at: updatedAt,
             tab: { ...version.tab, chords: action.track },
+          }
+        : version,
+    )
+  } else if (action.type === 'replace-beat-map') {
+    versions = versions.map((version) =>
+      version.id === action.versionId
+        ? {
+            ...version,
+            updated_at: updatedAt,
+            tab: applyBeatMap(version.tab, action.beatMap as BeatMapUpdate),
           }
         : version,
     )

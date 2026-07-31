@@ -16,9 +16,10 @@ time. Sync anchors connect both. Quantization never destroys the original onset.
 ## Versioned tab document
 
 Each song project owns shared audio and a shelf of named tab versions. A version
-owns its notes, fingering mode, origin, timestamps, and review counts. Generated
-output is a proposal: processing creates a new `Lead draft N`, and a style action
-derives a new version. Neither operation overwrites an edited source.
+owns its notes, fingering style, Beat Map, origin, timestamps, and review counts.
+Generated output is a proposal: processing creates a new `Lead draft N`, a
+whole-tab style action derives a new version, and Phrase Workshop derives an
+honestly labeled mixed-style version. None overwrites an edited source.
 
 Confidence is model evidence. `reviewed` is the musician's decision and is stored
 separately on each note. Refingering preserves review state when a note stays on
@@ -28,6 +29,11 @@ All mutations include one project-wide revision token; stale updates fail with
 `409`. SQLite persists projects, versions, reviews, selected sections, and
 recoverable Trash state. Browser local storage only remembers workspace
 preferences; playback position and note selection reset on reopen.
+
+Beat Map edits are staged and then replace the active version's tempo, meter,
+pickup phase, and sync anchors in one revision. Audio frames remain immutable;
+note and chord score fields are regenerated from the new piecewise map. Derived
+phrase versions inherit that corrected map, while sibling versions stay intact.
 
 ## One model seam
 

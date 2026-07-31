@@ -8,7 +8,7 @@ import mido
 import pytest
 from solotrace.demo import DEMO_ID, ensure_demo
 from solotrace.exports import ascii_tab, bundle, export_filename, midi, musicxml
-from solotrace.models import ChordTrack
+from solotrace.models import ChordTrack, SyncAnchor
 from solotrace.storage import ProjectStore
 
 
@@ -56,10 +56,15 @@ def test_musicxml_respects_denominator_tempo_and_splits_cross_measure_note(tmp_p
             "duration_ticks": 3_000,
         }
     )
+    anchor_span = round(project.tab.sample_rate * 60 * 10 / 137.5)
     tab = project.tab.model_copy(
         update={
             "tempo_bpm": 137.5,
             "time_signature": (6, 8),
+            "sync_anchors": [
+                SyncAnchor(audio_frame=0, score_tick=0),
+                SyncAnchor(audio_frame=anchor_span, score_tick=4_800),
+            ],
             "notes": [crossing_note],
             "chords": ChordTrack(),
         }

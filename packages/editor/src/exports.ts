@@ -1,6 +1,12 @@
 import { activeVersion } from './versions'
 import { soundingTuning } from './instrument'
 import {
+  beatMapFromTab,
+  pickupMidiShift,
+  tempoEventsForTab,
+  ticksPerMeasure as beatMapMeasureTicks,
+} from './beat-map'
+import {
   connectedTechnique,
   validateConnectedTechniqueFingerings,
   type ConnectedTechnique,
@@ -15,7 +21,7 @@ import type {
 
 const PITCH_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const PROJECT_FORMAT = 'solotrace-project'
-const PROJECT_SCHEMA_VERSION = 2
+const PROJECT_SCHEMA_VERSION = 3
 
 function pitchName(midiPitch: number): string {
   return `${PITCH_NAMES[((midiPitch % 12) + 12) % 12]}${Math.floor(midiPitch / 12) - 1}`
@@ -126,16 +132,39 @@ interface MeasureNote {
 
 function measureTicks(project: EditorProject): number {
   const tab = activeVersion(project).tab
-  const [beats, beatType] = tab.time_signature
-  if (beats <= 0 || beatType <= 0) throw new Error('Time signature values must be positive')
-  const ticks = (beats * tab.ticks_per_quarter * 4) / beatType
-  if (!Number.isInteger(ticks)) {
-    throw new Error('Time signature cannot be represented exactly with current ticks-per-quarter value')
-  }
-  return ticks
+  return beatMapMeasureTicks(tab.ticks_per_quarter, tab.time_signature)
 }
 
-function splitMusicXmlNotes(project: EditorProject, ticksPerMeasure: number): MeasureNote[] {
+interface MeasureLocation {
+  measureNumber: number
+  startTick: number
+  endTick: number
+  implicit: boolean
+}
+
+function measureLocationForTick(
+  tick: number,
+  ticksPerMeasure: number,
+  barOffsetTicks: number,
+): MeasureLocation {
+  if (barOffsetTicks > 0 && tick < barOffsetTicks) {
+    return { measureNumber: 0, startTick: 0, endTick: barOffsetTicks, implicit: true }
+  }
+  const adjusted = Math.max(0, tick - barOffsetTicks)
+  const index = Math.floor(adjusted / ticksPerMeasure)
+  return {
+    measureNumber: index + 1,
+    startTick: barOffsetTicks + index * ticksPerMeasure,
+    endTick: barOffsetTicks + (index + 1) * ticksPerMeasure,
+    implicit: false,
+  }
+}
+
+function splitMusicXmlNotes(
+  project: EditorProject,
+  ticksPerMeasure: number,
+  barOffsetTicks: number,
+): MeasureNote[] {
   const segments: MeasureNote[] = []
   let previousEnd = 0
   const notes = [...activeVersion(project).tab.notes].sort(
@@ -148,11 +177,11 @@ function splitMusicXmlNotes(project: EditorProject, ticksPerMeasure: number): Me
     const eventEnd = event.score_tick + event.duration_ticks
     let segmentStart = event.score_tick
     while (segmentStart < eventEnd) {
-      const measureIndex = Math.floor(segmentStart / ticksPerMeasure)
-      const segmentEnd = Math.min(eventEnd, (measureIndex + 1) * ticksPerMeasure)
+      const location = measureLocationForTick(segmentStart, ticksPerMeasure, barOffsetTicks)
+      const segmentEnd = Math.min(eventEnd, location.endTick)
       segments.push({
         event,
-        measureNumber: measureIndex + 1,
+        measureNumber: location.measureNumber,
         startTick: segmentStart,
         durationTicks: segmentEnd - segmentStart,
         tieStop: segmentStart > event.score_tick,
@@ -270,9 +299,26 @@ function musicXmlHarmony(chord: ChordEvent, measureStart: number): string[] {
   return lines
 }
 
+function musicXmlTempoDirection(
+  bpm: number,
+  offset: number,
+  hidden: boolean,
+): string[] {
+  const visibility = hidden ? ' print-object="no"' : ''
+  const lines = [
+    `    <direction placement="above"${visibility}>`,
+    '      <direction-type><metronome><beat-unit>quarter</beat-unit>',
+    `        <per-minute>${bpm}</per-minute></metronome></direction-type>`,
+  ]
+  if (offset > 0) lines.push(`      <offset>${offset}</offset>`)
+  lines.push(`      <sound tempo="${bpm}"/>`, '    </direction>')
+  return lines
+}
+
 export function musicXml(project: EditorProject): string {
   const tab = activeVersion(project).tab
   const ticksPerMeasure = measureTicks(project)
+  const barOffsetTicks = beatMapFromTab(tab).bar_offset_ticks
   const orderedNotes = [...tab.notes].sort(
     (left, right) => left.score_tick - right.score_tick || left.id.localeCompare(right.id),
   )
@@ -286,17 +332,37 @@ export function musicXml(project: EditorProject): string {
     incomingConnections.set(note.id, connection)
     outgoingConnections.set(previous.id, connection)
   })
-  const segments = splitMusicXmlNotes(project, ticksPerMeasure)
+  const segments = splitMusicXmlNotes(project, ticksPerMeasure, barOffsetTicks)
   const grouped = new Map<number, MeasureNote[]>()
   for (const segment of segments) {
     grouped.set(segment.measureNumber, [...(grouped.get(segment.measureNumber) ?? []), segment])
   }
   const harmonies = new Map<number, ChordEvent[]>()
   for (const chord of tab.chords.events) {
-    const measureNumber = Math.floor(chord.score_tick / ticksPerMeasure) + 1
+    const { measureNumber } = measureLocationForTick(
+      chord.score_tick,
+      ticksPerMeasure,
+      barOffsetTicks,
+    )
     harmonies.set(measureNumber, [...(harmonies.get(measureNumber) ?? []), chord])
   }
-  const lastMeasure = Math.max(1, ...grouped.keys(), ...harmonies.keys())
+  const tempoEvents = new Map<number, ReturnType<typeof tempoEventsForTab>>()
+  const finalEventTick = Math.max(
+    0,
+    ...tab.notes.map((note) => note.score_tick + note.duration_ticks),
+    ...tab.chords.events.map((chord) => chord.score_tick + chord.duration_ticks),
+  )
+  for (const tempo of tempoEventsForTab(tab)) {
+    if (tempo.scoreTick > finalEventTick) continue
+    const { measureNumber } = measureLocationForTick(
+      tempo.scoreTick,
+      ticksPerMeasure,
+      barOffsetTicks,
+    )
+    tempoEvents.set(measureNumber, [...(tempoEvents.get(measureNumber) ?? []), tempo])
+  }
+  const firstMeasure = barOffsetTicks > 0 ? 0 : 1
+  const lastMeasure = Math.max(1, ...grouped.keys(), ...harmonies.keys(), ...tempoEvents.keys())
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<score-partwise version="4.0">',
@@ -308,9 +374,16 @@ export function musicXml(project: EditorProject): string {
     '  </part-list>',
     '  <part id="P1">',
   ]
-  for (let measureNumber = 1; measureNumber <= lastMeasure; measureNumber += 1) {
-    lines.push(`  <measure number="${measureNumber}">`)
-    if (measureNumber === 1) {
+  for (let measureNumber = firstMeasure; measureNumber <= lastMeasure; measureNumber += 1) {
+    const location = measureLocationForTick(
+      measureNumber === 0 ? 0 : barOffsetTicks + (measureNumber - 1) * ticksPerMeasure,
+      ticksPerMeasure,
+      barOffsetTicks,
+    )
+    lines.push(
+      `  <measure number="${measureNumber}"${location.implicit ? ' implicit="yes"' : ''}>`,
+    )
+    if (measureNumber === firstMeasure) {
       const [beats, beatType] = tab.time_signature
       lines.push(
         '    <attributes>',
@@ -333,14 +406,18 @@ export function musicXml(project: EditorProject): string {
       lines.push(
         '      </staff-details>',
         '    </attributes>',
-        '    <direction placement="above">',
-        '      <direction-type><metronome><beat-unit>quarter</beat-unit>',
-        `        <per-minute>${tab.tempo_bpm}</per-minute></metronome></direction-type>`,
-        `      <sound tempo="${tab.tempo_bpm}"/>`,
-        '    </direction>',
       )
     }
-    const measureStart = (measureNumber - 1) * ticksPerMeasure
+    const measureStart = location.startTick
+    for (const [index, tempo] of (tempoEvents.get(measureNumber) ?? []).entries()) {
+      lines.push(
+        ...musicXmlTempoDirection(
+          tempo.bpm,
+          Math.max(0, tempo.scoreTick - measureStart),
+          measureNumber !== firstMeasure || index > 0,
+        ),
+      )
+    }
     for (const chord of [...(harmonies.get(measureNumber) ?? [])].sort(
       (left, right) => left.score_tick - right.score_tick || left.id.localeCompare(right.id),
     )) {
@@ -416,13 +493,30 @@ export function midi(project: EditorProject): Uint8Array {
     throw new Error('MIDI ticks-per-quarter must be between 1 and 32767')
   }
   const title = latin1(project.title)
-  const tempo = Math.max(1, Math.min(0xffffff, Math.round(60_000_000 / tab.tempo_bpm)))
   const track = [
     0x00, 0xff, 0x03, ...variableLength(title.length), ...title,
-    0x00, 0xff, 0x51, 0x03, (tempo >>> 16) & 0xff, (tempo >>> 8) & 0xff, tempo & 0xff,
     ...timeSignatureMeta(tab.time_signature),
   ]
   const events: { tick: number; order: number; bytes: number[] }[] = []
+  const pickupShift = pickupMidiShift(tab)
+  tempoEventsForTab(tab).forEach((event, index) => {
+    const microseconds = Math.max(
+      1,
+      Math.min(0xffffff, Math.round(60_000_000 / event.bpm)),
+    )
+    events.push({
+      tick: index === 0 ? 0 : event.scoreTick + pickupShift,
+      order: -2,
+      bytes: [
+        0xff,
+        0x51,
+        0x03,
+        (microseconds >>> 16) & 0xff,
+        (microseconds >>> 8) & 0xff,
+        microseconds & 0xff,
+      ],
+    })
+  })
   const notes = [...tab.notes].sort(
     (left, right) => left.score_tick - right.score_tick || left.id.localeCompare(right.id),
   )
@@ -431,9 +525,13 @@ export function midi(project: EditorProject): Uint8Array {
     if (!Number.isInteger(note.midi_pitch) || note.midi_pitch < 0 || note.midi_pitch > 127) {
       throw new Error(`MIDI pitch ${note.midi_pitch} is outside 0..127`)
     }
-    events.push({ tick: note.score_tick, order: 1, bytes: [0x90, note.midi_pitch, 82] })
     events.push({
-      tick: note.score_tick + note.duration_ticks,
+      tick: note.score_tick + pickupShift,
+      order: 1,
+      bytes: [0x90, note.midi_pitch, 82],
+    })
+    events.push({
+      tick: note.score_tick + note.duration_ticks + pickupShift,
       order: 0,
       bytes: [0x80, note.midi_pitch, 0],
     })

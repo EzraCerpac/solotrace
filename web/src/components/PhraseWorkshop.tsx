@@ -288,10 +288,15 @@ export function PhraseWorkshop({
           value={name}
           disabled={saving}
           aria-invalid={invalidName}
+          aria-describedby={invalidName ? 'phrase-version-name-error' : undefined}
           onChange={(event) => onNameChange(event.target.value)}
         />
       </label>
-      {invalidName && <p className="inline-error">Enter a name for the new version.</p>}
+      {invalidName && (
+        <p id="phrase-version-name-error" className="inline-error" role="alert">
+          Enter a name for the new version.
+        </p>
+      )}
 
       <div className="review-action-bar phrase-actions">
         <button className="button secondary" type="button" disabled={saving} onClick={onCancel}>

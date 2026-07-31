@@ -3,14 +3,17 @@ import type {
   MediaAsset,
   Passage,
   TabDocument,
+  VersionFingeringStyle,
 } from '@solotrace/editor'
 
 export type {
   AssetRole,
+  BeatMap,
   ChordEvent,
   ChordTrack,
   Confidence,
   Fingering,
+  FingeringConstraints,
   FingeringMode,
   MediaAsset,
   NoteEvent,
@@ -49,7 +52,7 @@ export interface TabVersionSummary {
   id: string
   name: string
   source: string
-  fingering_mode: FingeringMode
+  fingering_mode: VersionFingeringStyle
   created_at: string
   updated_at: string
   note_count: number
