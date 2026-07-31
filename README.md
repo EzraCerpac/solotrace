@@ -12,7 +12,7 @@ The honest product promise is **accurate notes with playable, editable
 fingerings**. Audio rarely reveals which of several equivalent string and fret
 positions a guitarist used.
 
-![SoloTrace editor, practice mode, local import, tab versions, and optional MVSep setup](docs/screenshots/solotrace-collage.jpg)
+![SoloTrace Phrase Workshop, Beat Map, Play mode, private import, and tab versions](docs/screenshots/solotrace-collage.jpg)
 
 SoloTrace is open source under the
 [Apache License 2.0](LICENSE). Signed app builds remain a limited private beta;
