@@ -41,6 +41,7 @@ declare global {
         ) => Promise<NativeBridgeResult>
         saveDiagnostics: () => Promise<NativeBridgeResult>
         revealDataFolder: () => Promise<NativeBridgeResult>
+        openExternal: (url: string) => Promise<NativeBridgeResult>
       }
     }
   }
@@ -69,6 +70,7 @@ export interface ProjectSummary {
   revision: number
   duration_s: number
   source_name: string
+  youtube_url: string | null
   demo: boolean
   trashed_at: string | null
   active_version_id: string
@@ -111,6 +113,7 @@ export interface Project {
   active_version_id: string
   run: ProcessingRun
   source_name: string
+  youtube_url: string | null
   demo: boolean
   trashed_at: string | null
   separation_scope: 'solo-guitar' | 'all-guitar' | 'preview' | 'exact'
@@ -125,6 +128,14 @@ export interface Capabilities {
   audio: {
     ffmpeg: boolean
     maxUploadMb: number
+  }
+  imports: {
+    youtube: {
+      available: boolean
+      cookieBrowsers: Array<'chrome' | 'safari'>
+      maxDurationS: number
+      disabledReason: string
+    }
   }
   separation: {
     selected: string

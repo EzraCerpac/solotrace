@@ -17,7 +17,7 @@ from .version import APP_VERSION
 
 PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 PROJECT_FORMAT = "solotrace-project"
-PROJECT_SCHEMA_VERSION = 3
+PROJECT_SCHEMA_VERSION = 4
 
 
 def pitch_name(midi_pitch: int) -> str:

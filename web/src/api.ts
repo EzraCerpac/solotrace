@@ -88,6 +88,20 @@ export const api = {
     return request<Project>('/api/projects', { method: 'POST', body })
   },
 
+  createYouTubeProject: (
+    url: string,
+    cookieBrowser: 'none' | 'chrome' | 'safari',
+  ) =>
+    request<Project>('/api/projects/youtube', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        cookie_browser: cookieBrowser,
+        rights_confirmed: true,
+      }),
+    }),
+
   importProject: (file: File) => {
     const body = new FormData()
     body.set('file', file)

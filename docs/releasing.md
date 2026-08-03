@@ -62,7 +62,11 @@ prerelease only after all release checks pass.
 The clean-Mac pass must install the DMG through Gatekeeper, open the generated
 demo, import a local song, run Offline preview, review one note and one chord
 without a pointer, enter Play mode, export and re-import a SoloTrace bundle,
-then relaunch and confirm project persistence.
+then relaunch and confirm project persistence. With an authorized test video,
+also verify anonymous, Chrome, and Safari YouTube import; playlist links with a
+current video; invalid, private, over-30-minute, and offline failures; the
+one-time rights acknowledgement; source reopening; and the 390 px layout. Never
+make a live YouTube request in CI.
 
 ## Local release
 

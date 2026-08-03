@@ -18,6 +18,16 @@ receive a Developer ID signed and notarized DMG.
 
 ## Create a draft
 
+- Choose **Audio file** for an existing recording, or **YouTube link** for one
+  video you have permission to download and process. YouTube import is available
+  only in the native macOS app and supports videos up to 30 minutes and 250 MB.
+- Anonymous YouTube access is most private. Signed-in Chrome or Safari may help
+  with account-accessible videos. SoloTrace remembers that choice, but never
+  stores or exports browser cookies. Close the selected browser if macOS prevents
+  cookie access, or fall back to a local audio file.
+- The first YouTube import requires a rights and terms acknowledgement. This is
+  remembered locally; every later import shows a short reminder. DRM, private,
+  member-only, or otherwise inaccessible videos may still fail.
 - SoloTrace transcribes the full song by default. Enable **Limit to a section**
   only when you want to drag a smaller range on the waveform.
 - **Offline preview** stays on the Mac and remains available without a key or
@@ -58,7 +68,7 @@ confirmation, then removes its database records and local media.
 `Save redacted diagnostics` writes a ZIP chosen by you. It includes app/build
 versions, macOS details, capability booleans, database integrity, failure codes,
 and recent SoloTrace logs. It excludes audio, notes, filenames, project
-metadata, and secrets. SoloTrace sends no telemetry.
+metadata, YouTube URLs, downloader output, and secrets. SoloTrace sends no telemetry.
 
 ## Roll back
 

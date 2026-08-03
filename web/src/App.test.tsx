@@ -15,6 +15,7 @@ const apiMock = vi.hoisted(() => ({
   processProject: vi.fn(),
   refinger: vi.fn(),
   createProject: vi.fn(),
+  createYouTubeProject: vi.fn(),
 }))
 
 vi.mock('./api', () => ({
@@ -28,6 +29,20 @@ import App from './App'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  const stored = new Map<string, string>()
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      get length() {
+        return stored.size
+      },
+      clear: () => stored.clear(),
+      getItem: (key: string) => stored.get(key) ?? null,
+      key: (index: number) => [...stored.keys()][index] ?? null,
+      removeItem: (key: string) => stored.delete(key),
+      setItem: (key: string, value: string) => stored.set(key, value),
+    } satisfies Storage,
+  })
   apiMock.listProjects.mockResolvedValue([project])
   apiMock.getProject.mockResolvedValue(project)
   apiMock.capabilities.mockResolvedValue({
@@ -35,6 +50,14 @@ beforeEach(() => {
     buildId: 'test',
     packaged: false,
     audio: { ffmpeg: true, maxUploadMb: 250 },
+    imports: {
+      youtube: {
+        available: true,
+        cookieBrowsers: ['chrome', 'safari'],
+        maxDurationS: 1800,
+        disabledReason: '',
+      },
+    },
     separation: {
       selected: 'preview',
       available: { preview: true, mvsep: false },
@@ -60,6 +83,18 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
     configurable: true,
     value: vi.fn(),
+  })
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.open = true
+    },
+  })
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.open = false
+    },
   })
   Object.defineProperty(document.documentElement, 'requestFullscreen', {
     configurable: true,
@@ -109,6 +144,104 @@ test('defaults a song longer than three minutes to full transcription', async ()
   ).toBeEnabled()
 })
 
+test('imports one YouTube link with remembered rights and browser choice', async () => {
+  const imported = {
+    ...project,
+    title: 'Imported from YouTube',
+    source_name: 'YouTube',
+    youtube_url: 'https://www.youtube.com/watch?v=YE7VzlLtp-4',
+  }
+  let finishImport: (value: Project) => void = () => undefined
+  apiMock.createYouTubeProject.mockReturnValue(
+    new Promise<Project>((resolve) => {
+      finishImport = resolve
+    }),
+  )
+
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Late Solo' })
+  fireEvent.click(screen.getByRole('button', { name: 'Choose a song' }))
+  fireEvent.click(screen.getByRole('button', { name: 'YouTube link' }))
+
+  expect(screen.getByLabelText('YouTube access')).toHaveValue('chrome')
+  fireEvent.change(screen.getByLabelText('YouTube video link'), {
+    target: { value: 'https://youtu.be/YE7VzlLtp-4' },
+  })
+  fireEvent.click(
+    screen.getByRole('checkbox', {
+      name: /I have permission to download and process this video/,
+    }),
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Import song' }))
+
+  expect(screen.getByRole('button', { name: 'Downloading and decoding…' })).toBeDisabled()
+  await act(async () => finishImport(imported))
+
+  await waitFor(() =>
+    expect(apiMock.createYouTubeProject).toHaveBeenCalledWith(
+      'https://youtu.be/YE7VzlLtp-4',
+      'chrome',
+    ),
+  )
+  expect(window.localStorage.getItem('solotrace.youtubeRightsAccepted.v1')).toBe('true')
+  expect(window.localStorage.getItem('solotrace.youtubeCookieBrowser')).toBe('chrome')
+  expect(await screen.findByRole('heading', { name: 'Imported from YouTube' })).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Choose a song' }))
+  fireEvent.click(screen.getByRole('button', { name: 'YouTube link' }))
+  expect(screen.getByText('Import only videos you have permission to download and process.'))
+    .toBeInTheDocument()
+  expect(within(screen.getByRole('dialog')).queryByRole('checkbox')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('YouTube access')).toHaveValue('chrome')
+})
+
+test('keeps a safe YouTube import error in the dialog', async () => {
+  apiMock.createYouTubeProject.mockRejectedValue(
+    new Error('YouTube did not provide accessible audio. Try a local file.'),
+  )
+
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Late Solo' })
+  fireEvent.click(screen.getByRole('button', { name: 'Choose a song' }))
+  fireEvent.click(screen.getByRole('button', { name: 'YouTube link' }))
+  fireEvent.change(screen.getByLabelText('YouTube video link'), {
+    target: { value: 'https://youtu.be/YE7VzlLtp-4' },
+  })
+  fireEvent.click(
+    screen.getByRole('checkbox', {
+      name: /I have permission to download and process this video/,
+    }),
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Import song' }))
+
+  expect(
+    await screen.findByText('YouTube did not provide accessible audio. Try a local file.'),
+  ).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Import song' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Audio file' })).toBeEnabled()
+})
+
+test('reopens a stored YouTube source from project details', async () => {
+  const youtubeProject = {
+    ...project,
+    youtube_url: 'https://www.youtube.com/watch?v=YE7VzlLtp-4',
+  }
+  apiMock.listProjects.mockResolvedValue([youtubeProject])
+  apiMock.getProject.mockResolvedValue(youtubeProject)
+  const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Late Solo' })
+  fireEvent.click(screen.getByRole('button', { name: 'Manage Late Solo' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Open on YouTube' }))
+
+  expect(open).toHaveBeenCalledWith(
+    'https://www.youtube.com/watch?v=YE7VzlLtp-4',
+    '_blank',
+    'noopener,noreferrer',
+  )
+})
+
 test('explains the MVSep service limit without limiting offline transcription', async () => {
   const longProject = { ...project, title: 'Long Song', duration_s: 700 }
   apiMock.listProjects.mockResolvedValue([longProject])
@@ -118,6 +251,14 @@ test('explains the MVSep service limit without limiting offline transcription', 
     buildId: 'test',
     packaged: false,
     audio: { ffmpeg: true, maxUploadMb: 250 },
+    imports: {
+      youtube: {
+        available: true,
+        cookieBrowsers: ['chrome', 'safari'],
+        maxDurationS: 1800,
+        disabledReason: '',
+      },
+    },
     separation: {
       selected: 'mvsep',
       available: { preview: true, mvsep: true },

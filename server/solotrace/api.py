@@ -58,12 +58,14 @@ from .models import (
     VersionCreateRequest,
     VersionRenameRequest,
     WorkspacePatch,
+    YouTubeImportRequest,
     now_iso,
 )
 from .phrase import plan_phrase_fingering
 from .pipeline import Pipeline, new_run
 from .storage import ProjectStore, RevisionConflictError
 from .version import APP_VERSION, BUILD_ID, PACKAGED
+from .youtube import YouTubeImportError, download_youtube_audio, youtube_capability
 
 ALLOWED_EXTENSIONS = {
     ".aac",
@@ -252,6 +254,7 @@ def _project_summary(project: Project) -> ProjectSummary:
         revision=project.revision,
         duration_s=project.duration_s,
         source_name=project.source_name,
+        youtube_url=project.youtube_url,
         demo=project.demo,
         trashed_at=project.trashed_at,
         active_version_id=project.active_version_id,
@@ -279,6 +282,7 @@ def _project_view(project: Project) -> ProjectView:
         active_version_id=project.active_version_id,
         run=project.run,
         source_name=project.source_name,
+        youtube_url=project.youtube_url,
         demo=project.demo,
         trashed_at=project.trashed_at,
         separation_scope=project.separation_scope,
@@ -321,6 +325,7 @@ def capabilities(request: Request) -> dict[str, object]:
             "ffmpeg": ffmpeg_available(),
             "maxUploadMb": settings.max_upload_bytes // 1024 // 1024,
         },
+        "imports": {"youtube": youtube_capability()},
         "separation": {
             "selected": "mvsep" if cloud else "preview",
             "available": {
@@ -413,6 +418,68 @@ def _ensure_decode_space(path: Path, data_dir: Path) -> None:
         raise AudioProcessingError("Not enough free disk space to import this audio safely")
 
 
+def _create_project_from_audio(
+    *,
+    store: ProjectStore,
+    settings: Settings,
+    source_path: Path,
+    project_id: str,
+    title: str,
+    artist: str,
+    source_name: str,
+    youtube_url: str | None = None,
+    provenance: list[str] | None = None,
+) -> Project:
+    decoded_path = source_path.parent / "canonical.wav"
+    _ensure_decode_space(source_path, settings.data_dir)
+    duration, sample_rate = canonicalize_audio(source_path, decoded_path)
+    peaks = waveform_peaks(decoded_path)
+    directory = store.project_dir(project_id)
+    final_audio = directory / "original.wav"
+    try:
+        decoded_path.replace(final_audio)
+        final_audio.chmod(0o600)
+        run = new_run().model_copy(
+            update={"state": RunState.idle, "message": "Ready to transcribe"}
+        )
+        project = Project(
+            id=project_id,
+            title=title.strip(),
+            artist=artist.strip(),
+            duration_s=duration,
+            passage=Passage(name="Full song", start_s=0, end_s=duration),
+            assets=[
+                MediaAsset(
+                    role="original",
+                    url=f"/media/{project_id}/original.wav",
+                    filename="original.wav",
+                    duration_s=duration,
+                    sample_rate=sample_rate,
+                    method="Local FFmpeg decode",
+                )
+            ],
+            versions=[
+                TabVersion(
+                    id="version-original",
+                    name="Original draft",
+                    source="import",
+                    tab=TabDocument(sample_rate=sample_rate),
+                )
+            ],
+            active_version_id="version-original",
+            run=run,
+            source_name=source_name,
+            youtube_url=youtube_url,
+            waveform_peaks=peaks,
+            provenance=provenance
+            or ["Audio decoded locally with FFmpeg. No cloud upload."],
+        )
+        return store.put(project, reason="import audio")
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+
+
 @app.post("/api/projects", response_model=ProjectView, status_code=201)
 async def create_project(
     request: Request,
@@ -437,7 +504,6 @@ async def create_project(
     ) as temporary_name:
         temporary = Path(temporary_name)
         upload_path = temporary / f"source{Path(filename).suffix.lower()}"
-        decoded_path = temporary / "original.wav"
         try:
             with upload_path.open("wb") as output:
                 while chunk := await file.read(1024 * 1024):
@@ -453,53 +519,67 @@ async def create_project(
                     output.write(chunk)
             if size == 0:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
-            await run_in_threadpool(_ensure_decode_space, upload_path, settings.data_dir)
-            duration, sample_rate = await run_in_threadpool(
-                canonicalize_audio,
-                upload_path,
-                decoded_path,
+            project = await run_in_threadpool(
+                _create_project_from_audio,
+                store=store,
+                settings=settings,
+                source_path=upload_path,
+                project_id=project_id,
+                title=title,
+                artist=artist,
+                source_name=filename,
             )
-            peaks = await run_in_threadpool(waveform_peaks, decoded_path)
-            directory = store.project_dir(project_id)
-            decoded_path.replace(directory / "original.wav")
         except AudioProcessingError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         finally:
             await file.close()
 
-    initial_end = min(duration, max(4.0, duration))
-    run = new_run().model_copy(update={"state": RunState.idle, "message": "Ready to transcribe"})
-    project = Project(
-        id=project_id,
-        title=title.strip(),
-        artist=artist.strip(),
-        duration_s=duration,
-        passage=Passage(name="Full song", start_s=0, end_s=initial_end),
-        assets=[
-            MediaAsset(
-                role="original",
-                url=f"/media/{project_id}/original.wav",
-                filename="original.wav",
-                duration_s=duration,
-                sample_rate=sample_rate,
-                method="Local FFmpeg decode",
+    return _project_view(project)
+
+
+@app.post("/api/projects/youtube", response_model=ProjectView, status_code=201)
+async def create_youtube_project(
+    body: YouTubeImportRequest,
+    request: Request,
+) -> ProjectView:
+    settings = _settings(request)
+    store = _store(request)
+    capability = youtube_capability()
+    if not capability["available"]:
+        raise HTTPException(status_code=503, detail=capability["disabledReason"])
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".solotrace-youtube-import-",
+        dir=settings.data_dir,
+    ) as temporary_name:
+        try:
+            downloaded = await run_in_threadpool(
+                download_youtube_audio,
+                body.url,
+                Path(temporary_name),
+                cookie_browser=body.cookie_browser,
+                max_bytes=settings.max_upload_bytes,
             )
-        ],
-        versions=[
-            TabVersion(
-                id="version-original",
-                name="Original draft",
-                source="import",
-                tab=TabDocument(sample_rate=sample_rate),
+            project = await run_in_threadpool(
+                _create_project_from_audio,
+                store=store,
+                settings=settings,
+                source_path=downloaded.path,
+                project_id=f"{_slug(downloaded.title)}-{uuid.uuid4().hex[:12]}",
+                title=downloaded.title,
+                artist=downloaded.artist,
+                source_name="YouTube",
+                youtube_url=downloaded.canonical_url,
+                provenance=[
+                    "Audio downloaded locally from YouTube with yt-dlp.",
+                    "Audio decoded locally with FFmpeg. No SoloTrace cloud upload.",
+                ],
             )
-        ],
-        active_version_id="version-original",
-        run=run,
-        source_name=filename,
-        waveform_peaks=peaks,
-        provenance=["Audio decoded locally with FFmpeg. No cloud upload."],
-    )
-    return _project_view(store.put(project, reason="import audio"))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except (AudioProcessingError, YouTubeImportError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+    return _project_view(project)
 
 
 @app.post("/api/projects/import", response_model=ProjectView, status_code=201)

@@ -2842,6 +2842,37 @@ li[data-status='complete'] .stage-dot {
   font-weight: 400;
 }
 
+.import-source-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid var(--nickel);
+  border-radius: 7px;
+  background: var(--paper);
+}
+
+.import-source-switch button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.import-source-switch button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--chalk);
+}
+
+.import-source-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .file-drop {
   min-height: 160px;
   display: flex;
@@ -2875,6 +2906,64 @@ li[data-status='complete'] .stage-dot {
   height: 1px;
   overflow: hidden;
   opacity: 0;
+}
+
+.youtube-import-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--nickel);
+  border-radius: 7px;
+  background: var(--paper);
+}
+
+.youtube-import-fields > label:not(.rights-confirmation) {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.youtube-import-fields input[type='url'],
+.youtube-import-fields select {
+  height: 42px;
+  padding: 7px 9px;
+  border: 1px solid var(--nickel);
+  border-radius: 5px;
+  background: var(--chalk);
+  color: var(--ink);
+}
+
+.rights-confirmation {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: start;
+  gap: 9px;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.rights-confirmation input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.rights-reminder,
+.youtube-source-note {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.rights-reminder {
+  color: var(--oxide);
+  font-weight: 700;
+}
+
+.youtube-source-note {
+  color: var(--ink-soft);
 }
 
 .dialog-fields {
@@ -2914,6 +3003,23 @@ li[data-status='complete'] .stage-dot {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
+}
+
+.project-source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--nickel);
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.project-source-row span {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
 }
 
 .toast {
@@ -3417,6 +3523,11 @@ li[data-status='complete'] .stage-dot {
 
   .upload-dialog form {
     padding: 18px;
+  }
+
+  .project-source-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .review-action-bar {

@@ -226,10 +226,18 @@ The hosted example studio never accepts personal audio. Anonymous drafts stay in
 the browser; signed-in saved copies store only the edited example document and a
 server-derived owner identifier.
 
-SoloTrace does not fetch YouTube URLs:
-local URL downloading adds platform-terms, copyright, and server-side request
-risks without improving the transcription core. A future desktop-only importer
-can be evaluated separately.
+The native macOS app can import one authorized YouTube video link at a time.
+It accepts only validated YouTube HTTPS video URLs, caps imports at 30 minutes
+and 250 MB, and downloads into a temporary directory before using the same local
+FFmpeg pipeline as file import. Chrome or Safari access is optional; browser
+cookies remain inside the short-lived downloader process and are never exported
+or stored by SoloTrace. Only the selected browser and canonical source URL are
+remembered. The hosted example studio has no YouTube importer.
+
+YouTube import uses the unofficial `yt-dlp` downloader. Users must confirm they
+have permission and remain responsible for complying with the
+[YouTube Terms](https://www.youtube.com/static?template=terms). DRM and
+inaccessible videos are unsupported; use local file import when needed.
 
 The bundled demo is synthesized locally and contains no third-party recording.
 

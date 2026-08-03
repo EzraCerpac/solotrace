@@ -21,5 +21,6 @@ build
 !site/build/**
 dist
 vendor/ffmpeg
+vendor/youtube
 data/
 *.log

@@ -5,18 +5,22 @@ import type { ProjectSummary } from '../types'
 
 interface ProjectDialogProps {
   project: ProjectSummary | null
+  youtubeUrl: string | null
   saving: boolean
   onClose: () => void
   onRename: (title: string, artist: string) => Promise<void>
   onTrash: () => Promise<void>
+  onOpenYouTube: (url: string) => Promise<void>
 }
 
 export function ProjectDialog({
   project,
+  youtubeUrl,
   saving,
   onClose,
   onRename,
   onTrash,
+  onOpenYouTube,
 }: ProjectDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [title, setTitle] = useState('')
@@ -86,6 +90,19 @@ export function ProjectDialog({
             />
           </label>
         </div>
+        {youtubeUrl && (
+          <div className="project-source-row">
+            <span>Source saved with project and exported bundles</span>
+            <button
+              className="button secondary"
+              type="button"
+              disabled={saving}
+              onClick={() => void onOpenYouTube(youtubeUrl)}
+            >
+              Open on YouTube
+            </button>
+          </div>
+        )}
         <div className="dialog-actions split-actions">
           <button
             className="button danger-text"

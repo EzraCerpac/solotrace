@@ -293,11 +293,21 @@ class Project(StrictModel):
     active_version_id: str
     run: ProcessingRun
     source_name: str
+    youtube_url: str | None = Field(default=None, max_length=2_048)
     demo: bool = False
     trashed_at: str | None = None
     separation_scope: Literal["solo-guitar", "all-guitar", "preview", "exact"] = "preview"
     waveform_peaks: list[float] = Field(default_factory=list, max_length=5000)
     provenance: list[str] = Field(default_factory=list, max_length=64)
+
+    @field_validator("youtube_url")
+    @classmethod
+    def validate_youtube_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from .youtube import canonicalize_youtube_url
+
+        return canonicalize_youtube_url(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -381,6 +391,7 @@ class ProjectSummary(StrictModel):
     revision: int
     duration_s: float
     source_name: str
+    youtube_url: str | None
     demo: bool
     trashed_at: str | None
     active_version_id: str
@@ -406,6 +417,7 @@ class ProjectView(StrictModel):
     active_version_id: str
     run: ProcessingRun
     source_name: str
+    youtube_url: str | None
     demo: bool
     trashed_at: str | None
     separation_scope: Literal["solo-guitar", "all-guitar", "preview", "exact"]
@@ -461,6 +473,12 @@ class ProjectMutationRequest(StrictModel):
 class ProjectRenameRequest(ProjectMutationRequest):
     title: str = Field(min_length=1, max_length=120)
     artist: str = Field(default="", max_length=120)
+
+
+class YouTubeImportRequest(StrictModel):
+    url: str = Field(min_length=1, max_length=2_048)
+    cookie_browser: Literal["none", "chrome", "safari"] = "none"
+    rights_confirmed: Literal[True]
 
 
 class WorkspacePatch(ProjectMutationRequest):

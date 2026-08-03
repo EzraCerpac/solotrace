@@ -11,5 +11,10 @@ support commitments. Testers must have the necessary rights to process and, when
 explicitly consented, upload audio. Do not share another person’s audio, project
 data, diagnostics, credentials, or other private data.
 
+YouTube import uses an unofficial downloader rather than the YouTube Data API.
+Testers must import only videos they are authorized to download and process and
+remain responsible for the [YouTube Terms](https://www.youtube.com/static?template=terms).
+SoloTrace does not support DRM circumvention.
+
 Third-party components remain governed by their own licenses. These terms do
 not restrict rights granted by those licenses.

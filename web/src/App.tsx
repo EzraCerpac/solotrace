@@ -125,6 +125,7 @@ function summaryFromProject(project: Project): ProjectSummary {
     revision: project.revision,
     duration_s: project.duration_s,
     source_name: project.source_name,
+    youtube_url: project.youtube_url,
     demo: project.demo,
     trashed_at: project.trashed_at,
     active_version_id: project.active_version_id,
@@ -2916,6 +2917,15 @@ function App() {
           setCloudConsent(false)
           return next
         }}
+        onYouTubeUpload={async (url, cookieBrowser) => {
+          const next = await api.createYouTubeProject(url, cookieBrowser)
+          adoptProject(next)
+          setTrack('original')
+          setCurrentTime(0)
+          setDraftScope('whole')
+          setCloudConsent(false)
+          return next
+        }}
       />
         </>
       )}
@@ -2954,10 +2964,20 @@ function App() {
 
       <ProjectDialog
         project={projectDialogProject ? summaryFromProject(project) : null}
+        youtubeUrl={projectDialogProject ? project.youtube_url : null}
         saving={saving}
         onClose={() => setProjectDialogProject(null)}
         onRename={renameCurrentProject}
         onTrash={trashCurrentProject}
+        onOpenYouTube={async (url) => {
+          const bridge = window.pywebview?.api
+          if (capabilities?.packaged && bridge) {
+            const result = await bridge.openExternal(url)
+            if (!result.ok) setError(result.error ?? 'Could not open YouTube')
+            return
+          }
+          window.open(url, '_blank', 'noopener,noreferrer')
+        }}
       />
 
       {(notice || error) && (
