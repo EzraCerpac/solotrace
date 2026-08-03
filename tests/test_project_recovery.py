@@ -88,6 +88,38 @@ def test_bundle_round_trip_and_atomic_permanent_deletion(tmp_path, monkeypatch) 
         ).exists()
 
 
+def test_bundle_round_trip_preserves_canonical_youtube_url(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    store = ProjectStore(data_dir)
+    project = ensure_demo(store).model_copy(
+        update={
+            "youtube_url": "https://www.youtube.com/watch?v=YE7VzlLtp-4"
+        }
+    )
+    store.put(project, reason="test YouTube source")
+    store.checkpoint()
+    monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(data_dir))
+
+    with TestClient(app) as client:
+        bundle = client.get(f"/api/projects/{DEMO_ID}/export/bundle")
+        imported = client.post(
+            "/api/projects/import",
+            files={
+                "file": (
+                    "youtube.solotrace.zip",
+                    bundle.content,
+                    "application/zip",
+                )
+            },
+        )
+
+    assert bundle.status_code == 200
+    assert imported.status_code == 201
+    assert imported.json()["youtube_url"] == (
+        "https://www.youtube.com/watch?v=YE7VzlLtp-4"
+    )
+
+
 def test_v1_bundle_import_injects_empty_chord_tracks(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SOLOTRACE_DATA_DIR", str(tmp_path / "data"))
     with TestClient(app) as client:

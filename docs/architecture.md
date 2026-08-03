@@ -35,9 +35,9 @@ pickup phase, and sync anchors in one revision. Audio frames remain immutable;
 note and chord score fields are regenerated from the new piecewise map. Derived
 phrase versions inherit that corrected map, while sibling versions stay intact.
 
-## One model seam
+## One processing seam
 
-Separation is the only network boundary. The selected route is MVSep's
+Separation is the only processing network boundary. The selected route is MVSep's
 role-aware one-stage Lead/Rhythm model; it returns a foreground lead estimate,
 while backing is created locally as original minus lead. Spotify Basic Pitch,
 beat mapping, fingering, persistence, editing, and export remain local.
@@ -51,9 +51,18 @@ Each cloud request carries explicit user consent. MVSep polling runs inside the
 existing single-worker pipeline and supports cancellation, so no second queue,
 database, or service is needed.
 
-## URL import deferred
+## Desktop YouTube import boundary
 
-The first release accepts local files. Server-side URL fetching would introduce
-SSRF controls, downloader upkeep, YouTube terms, copyright ambiguity, and
-surprising network transmission. None helps answer whether the editor and
-transcription are useful.
+The hosted studio never fetches URLs. The native macOS app may import one
+strictly validated YouTube HTTPS video URL through its loopback-only API. URL
+parsing accepts exact YouTube hosts and known video routes, then canonicalizes
+the video ID before any process starts. Channels, searches, playlist-only URLs,
+credentials, ports, and lookalike hosts fail closed.
+
+A pinned `yt-dlp` executable and Deno runtime run directly without a shell,
+user configuration, plugins, updates, remote components, playlists, or a
+persistent cache. The process has a ten-minute timeout; downloaded data lives in
+a private temporary directory and then enters the shared local FFmpeg import
+helper. Optional Chrome or Safari cookies remain inside that process. SoloTrace
+stores only the chosen browser preference and canonical source URL. Diagnostic
+output redacts YouTube URLs and never includes raw downloader output.

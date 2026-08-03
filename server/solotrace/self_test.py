@@ -20,6 +20,12 @@ def run() -> None:
     assert settings.packaged
     assert settings.web_dist.joinpath("index.html").is_file()
     assert ffmpeg_available()
+    from .youtube import youtube_tools
+
+    ytdlp, deno = youtube_tools()
+    assert ytdlp is not None and deno is not None
+    subprocess.run([str(ytdlp), "--version"], check=True, capture_output=True, timeout=30)
+    subprocess.run([str(deno), "--version"], check=True, capture_output=True, timeout=30)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=settings.data_dir) as temporary:
         workspace = settings.data_dir.joinpath(temporary)

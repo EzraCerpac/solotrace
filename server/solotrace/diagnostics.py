@@ -66,6 +66,13 @@ def _redact(text: str) -> str:
         text,
     )
     text = re.sub(
+        r"https://(?:(?:www|m|music)\.)?youtube\.com/[^\s\"']+"
+        r"|https://youtu\.be/[^\s\"']+",
+        "<youtube-url>",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
         r"(?i)(api[_ -]?token|api[_ -]?key|authorization|cookie|token)"
         r"([\"':=\s]+)\S+",
         r"\1\2<redacted>",

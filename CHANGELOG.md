@@ -3,6 +3,8 @@
 ## 0.1.0 private beta
 
 - Native Apple-Silicon macOS app with local authenticated service.
+- Desktop-only YouTube video import with explicit rights confirmation, optional
+  Chrome or Safari session access, and local decoding.
 - Offline preview and per-run-consent Experimental MVSep lead estimate.
 - Persistent projects, tab versions, play mode, safe bundle import, Trash, and
   permanent deletion.

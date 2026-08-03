@@ -122,6 +122,7 @@ export function makeProject({
       updated_at: '',
     },
     source_name: 'song.wav',
+    youtube_url: null,
     demo: false,
     trashed_at: null,
     separation_scope: 'exact',

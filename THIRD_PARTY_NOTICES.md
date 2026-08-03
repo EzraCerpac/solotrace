@@ -19,6 +19,12 @@ Material runtime components include:
   redistributed under LGPL-2.1-or-later. The source version, build
   configuration, and LGPL text are bundled under
   `Contents/Resources/licenses/ffmpeg`.
+- yt-dlp 2026.07.04, distributed under the Unlicense. The bundled official
+  macOS executable contains separately licensed dependencies documented by
+  the upstream release.
+- Deno 2.9.4, distributed under the MIT License. It runs yt-dlp's bundled
+  YouTube challenge code with restricted permissions. YouTube-tool license
+  texts are bundled under `Contents/Resources/licenses/youtube`.
 - Spotify Basic Pitch and its model, Apache-2.0.
 - Python, PSF-2.0.
 - FastAPI, Starlette, Uvicorn, HTTPX, NumPy, SciPy, librosa, SoundFile, mido,

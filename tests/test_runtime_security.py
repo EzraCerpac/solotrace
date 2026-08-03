@@ -136,9 +136,10 @@ def test_diagnostic_export_redacts_secrets_resources_and_project_metadata(
     with TestClient(app) as client:
         project = client.get(f"/api/projects/{DEMO_ID}").json()
         logging.getLogger("solotrace.security-test").error(
-            "api_token=%s GET /media/%s/original.wav",
+            "api_token=%s GET /media/%s/original.wav source=%s",
             secret,
             DEMO_ID,
+            "https://youtu.be/YE7VzlLtp-4?t=12",
         )
         response = client.get("/api/diagnostics/export")
 
@@ -154,5 +155,8 @@ def test_diagnostic_export_redacts_secrets_resources_and_project_metadata(
     assert "original.wav" not in combined
     assert project["title"] not in combined
     assert project["source_name"] not in combined
+    assert "youtu.be" not in combined
+    assert "YE7VzlLtp-4" not in combined
     assert "<redacted>" in log
     assert "<project-resource>" in log
+    assert "<youtube-url>" in log

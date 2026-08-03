@@ -193,6 +193,22 @@ class DesktopBridge:
             logger.exception("Could not reveal data folder")
             return {"ok": False, "error": "SoloTrace could not reveal its data folder."}
 
+    def openExternal(self, url: str) -> dict[str, object]:
+        try:
+            from AppKit import NSWorkspace
+            from Foundation import NSURL
+
+            from .youtube import canonicalize_youtube_url
+
+            canonical = canonicalize_youtube_url(url)
+            target = NSURL.URLWithString_(canonical)
+            if target is None or not NSWorkspace.sharedWorkspace().openURL_(target):
+                raise RuntimeError("macOS did not open the URL")
+            return {"ok": True}
+        except Exception:
+            logger.exception("Could not open validated YouTube source")
+            return {"ok": False, "error": "SoloTrace could not open this YouTube source."}
+
 
 def _worker() -> None:
     if len(sys.argv) > 2 and sys.argv[2].endswith("basic_pitch_worker.py"):
@@ -227,6 +243,12 @@ def _configure_bundled_tools() -> None:
     if ffmpeg.is_file() and ffprobe.is_file():
         os.environ["SOLOTRACE_FFMPEG"] = str(ffmpeg)
         os.environ["SOLOTRACE_FFPROBE"] = str(ffprobe)
+    youtube = resources / "youtube" / "bin"
+    ytdlp = youtube / "yt-dlp"
+    deno = youtube / "deno"
+    if ytdlp.is_file() and deno.is_file():
+        os.environ["SOLOTRACE_YTDLP"] = str(ytdlp)
+        os.environ["SOLOTRACE_DENO"] = str(deno)
 
 
 def run() -> None:

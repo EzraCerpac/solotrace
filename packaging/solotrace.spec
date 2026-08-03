@@ -27,6 +27,8 @@ datas = [
     (str(ROOT / "web" / "dist"), "solotrace/static"),
     (str(ROOT / "vendor" / "ffmpeg" / "bin"), "ffmpeg/bin"),
     (str(ROOT / "vendor" / "ffmpeg" / "LICENSE"), "licenses/ffmpeg"),
+    (str(ROOT / "vendor" / "youtube" / "bin"), "youtube/bin"),
+    (str(ROOT / "vendor" / "youtube" / "LICENSE"), "licenses/youtube"),
     (str(ROOT / "build" / "macos" / "licenses"), "licenses/python"),
     (str(ROOT / "docs" / "beta"), "Beta Guide"),
     (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),

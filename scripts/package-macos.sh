@@ -12,6 +12,7 @@ fi
 cd "$root"
 pnpm build
 ./scripts/build-ffmpeg-macos.sh
+./scripts/build-youtube-tools-macos.sh
 UV_CACHE_DIR="$root/.uv-cache" uv sync --locked --no-dev --group desktop
 UV_CACHE_DIR="$root/.uv-cache" uv run --frozen --no-dev python \
   scripts/collect-python-licenses.py build/macos/licenses

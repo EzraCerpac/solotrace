@@ -12,6 +12,15 @@ Offline preview, transcription, fingering, editing, playback, exports, and
 diagnostic generation run locally. A diagnostic bundle is saved only when the
 tester asks and is not uploaded by SoloTrace.
 
+When a tester imports a YouTube link, the native app connects directly to
+YouTube through a short-lived bundled downloader. The download and decoded audio
+remain local. If the tester selects Chrome or Safari access, that downloader
+reads the browser session in memory; SoloTrace never writes a cookie export or
+includes cookies in logs, diagnostics, or project bundles. SoloTrace remembers
+only the browser choice. The canonical YouTube source URL is stored with the
+project and included in exported SoloTrace bundles so the tester can reopen the
+source. Diagnostics redact the URL and raw downloader output.
+
 If the tester explicitly selects the Experimental MVSep path and confirms
 rights for that run, SoloTrace uploads only the chosen audio range to MVSep and
 downloads the resulting lead estimate. The MVSep API key is stored in macOS
