@@ -1,0 +1,48 @@
+diff --git a/dist/cjs/types/utils.js b/dist/cjs/types/utils.js
+--- a/dist/cjs/types/utils.js
++++ b/dist/cjs/types/utils.js
+@@ -46,6 +46,8 @@
+     if (input.length - offset < BOX_HEADER_SIZE)
+         return undefined;
+     const boxSize = (0, exports.readUInt32BE)(input, offset);
++    if (boxSize < 8)
++        return undefined;
+     if (input.length - offset < boxSize)
+         return undefined;
+     return {
+diff --git a/dist/cjs/types/icns.js b/dist/cjs/types/icns.js
+--- a/dist/cjs/types/icns.js
++++ b/dist/cjs/types/icns.js
+@@ -63,7 +63,7 @@
+             const imageHeader = readImageHeader(input, imageOffset);
+             const entryLength = imageHeader[1];
+             if (entryLength < 8) {
+-                throw new TypeError('Invalid ICNS');
++                throw new TypeError('Invalid ICNS entry length');
+             }
+             const imageSize = getImageSize(imageHeader[0]);
+             images.push(imageSize);
+diff --git a/dist/esm/types/utils.js b/dist/esm/types/utils.js
+--- a/dist/esm/types/utils.js
++++ b/dist/esm/types/utils.js
+@@ -31,6 +31,8 @@
+     if (input.length - offset < BOX_HEADER_SIZE)
+         return undefined;
+     const boxSize = readUInt32BE(input, offset);
++    if (boxSize < 8)
++        return undefined;
+     if (input.length - offset < boxSize)
+         return undefined;
+     return {
+diff --git a/dist/esm/types/icns.js b/dist/esm/types/icns.js
+--- a/dist/esm/types/icns.js
++++ b/dist/esm/types/icns.js
+@@ -60,7 +60,7 @@
+             const imageHeader = readImageHeader(input, imageOffset);
+             const entryLength = imageHeader[1];
+             if (entryLength < 8) {
+-                throw new TypeError('Invalid ICNS');
++                throw new TypeError('Invalid ICNS entry length');
+             }
+             const imageSize = getImageSize(imageHeader[0]);
+             images.push(imageSize);
