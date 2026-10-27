@@ -413,7 +413,7 @@ test('keeps Play disabled and explains why when a project has chords but no tab'
   expect(playModeButton).toHaveTextContent('Play')
 })
 
-function mockReviewPersistence(initial: Project) {
+function mockReviewPersistence(initial: Project, chordSave?: Promise<void>) {
   let serverProject = initial
   apiMock.patchNotes.mockImplementation(
     async (
@@ -437,6 +437,7 @@ function mockReviewPersistence(initial: Project) {
       _expectedRevision: number,
       chords: ChordTrack,
     ) => {
+      await chordSave
       serverProject = {
         ...serverProject,
         revision: serverProject.revision + 1,
@@ -446,6 +447,61 @@ function mockReviewPersistence(initial: Project) {
     },
   )
 }
+
+async function pressReviewKey(key: string, modifiers: KeyboardEventInit = {}) {
+  // Flush persistence, history updates, and the keyboard listener's selection
+  // before dispatching another action. An optimistic DOM update is too early.
+  await act(async () => {
+    fireEvent.keyDown(window, { key, ...modifiers })
+  })
+}
+
+test('waits for a pending chord save before accepting the next review item', async () => {
+  const reviewProject = makeReviewProject()
+  apiMock.listProjects.mockResolvedValue([reviewProject])
+  apiMock.getProject.mockResolvedValue(reviewProject)
+  let finishSave!: () => void
+  mockReviewPersistence(reviewProject, new Promise<void>((resolve) => {
+    finishSave = resolve
+  }))
+
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Review · 2 remaining' }))
+  await pressReviewKey('a')
+  expect(screen.getByText('Saving')).toBeInTheDocument()
+  expect(apiMock.patchChords).toHaveBeenCalledTimes(1)
+
+  await pressReviewKey('a')
+  expect(apiMock.patchChords).toHaveBeenCalledTimes(1)
+  expect(apiMock.patchNotes).not.toHaveBeenCalled()
+
+  await act(async () => finishSave())
+  expect(screen.getByText('Check pitch')).toBeInTheDocument()
+  expect(screen.getByText(`Revision ${reviewProject.revision + 1}`)).toBeInTheDocument()
+  expect(apiMock.patchChords).toHaveBeenCalledWith(
+    reviewProject.id,
+    reviewProject.active_version_id,
+    reviewProject.revision,
+    expect.objectContaining({
+      events: expect.arrayContaining([
+        expect.objectContaining({ id: 'uncertain-chord', reviewed: true }),
+      ]),
+    }),
+  )
+
+  await pressReviewKey('a')
+  expect(screen.getByText('Review complete')).toBeInTheDocument()
+  expect(apiMock.patchNotes).toHaveBeenCalledTimes(1)
+  expect(apiMock.patchNotes).toHaveBeenCalledWith(
+    reviewProject.id,
+    reviewProject.active_version_id,
+    reviewProject.revision + 1,
+    expect.arrayContaining([
+      expect.objectContaining({ id: 'uncertain-note', reviewed: true }),
+    ]),
+  )
+  expect(screen.getByText(`Revision ${reviewProject.revision + 2}`)).toBeInTheDocument()
+})
 
 test('reviews notes and chords in one keyboard-first session, then restores playback state', async () => {
   const reviewProject = makeReviewProject()
@@ -469,7 +525,7 @@ test('reviews notes and chords in one keyboard-first session, then restores play
   )
   expect(screen.getByText('Check chord match · 61% confidence')).toBeInTheDocument()
 
-  fireEvent.keyDown(window, { key: 'a' })
+  await pressReviewKey('a')
   await screen.findByText('Check pitch')
   expect(apiMock.patchChords).toHaveBeenCalledTimes(1)
 
@@ -477,7 +533,7 @@ test('reviews notes and chords in one keyboard-first session, then restores play
   fireEvent.keyDown(pitchInput, { key: 'a' })
   expect(apiMock.patchNotes).not.toHaveBeenCalled()
 
-  fireEvent.keyDown(window, { key: 'a' })
+  await pressReviewKey('a')
   await screen.findByText('Review complete')
   expect(apiMock.patchNotes).toHaveBeenCalledTimes(1)
 
@@ -502,21 +558,21 @@ test('undoes and redoes alternating note and chord changes through one history',
   fireEvent.click(
     await screen.findByRole('button', { name: 'Review · 2 remaining' }),
   )
-  fireEvent.keyDown(window, { key: 'a' })
+  await pressReviewKey('a')
   await screen.findByText('Check pitch')
-  fireEvent.keyDown(window, { key: 'a' })
+  await pressReviewKey('a')
   await screen.findByText('Review complete')
 
-  fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+  await pressReviewKey('z', { ctrlKey: true })
   await waitFor(() => expect(apiMock.patchNotes).toHaveBeenCalledTimes(2))
-  fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+  await pressReviewKey('z', { ctrlKey: true })
   await waitFor(() => expect(apiMock.patchChords).toHaveBeenCalledTimes(2))
 
   expect(screen.getByText('2 remaining')).toBeInTheDocument()
 
-  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+  await pressReviewKey('z', { ctrlKey: true, shiftKey: true })
   await waitFor(() => expect(apiMock.patchChords).toHaveBeenCalledTimes(3))
-  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+  await pressReviewKey('z', { ctrlKey: true, shiftKey: true })
   await waitFor(() => expect(apiMock.patchNotes).toHaveBeenCalledTimes(3))
 
   expect(screen.getByText('Review complete')).toBeInTheDocument()
